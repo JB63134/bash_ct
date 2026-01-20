@@ -140,3 +140,10 @@ ct ./script
 ```
 
 ---
+## Screenshots / Output Preview
+
+![awk](images/awk.png)
+![mawk](images/mawk.png)
+![cd](images/cd.png)
+![cd2](images/more_cd.png)
+![which](images/which.png)
