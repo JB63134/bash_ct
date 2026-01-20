@@ -1,0 +1,117 @@
+.TH CT 1 "January 2026" "ct 4.2.5" "User Commands"
+.SH NAME
+ct \- trace Bash command resolution and kernel execution
+
+.SH SYNOPSIS
+.B ct
+[\fIoptions\fR] \fIcommand\fR
+.br
+(command must be a bare name, not a path)
+
+.SH DESCRIPTION
+\fBct\fR (Command Trace) analyzes how Bash resolves a command name and what executable the kernel ultimately runs.
+
+It traces the full Bash command resolution process, including aliases,
+functions, keywords, builtins, and external executables. It also reports
+shadowed commands, overrides, PATH scanning results, and filesystem
+indirection such as symlinks, alternatives and usr-merged directories.
+
+The command argument must be a bare command name. Paths such as
+\fI/bin/ls\fR or \fI./script\fR are rejected.
+
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Display usage information and exit.
+
+.TP
+.BR \-v ", " \-\-version
+Display version and license information and exit.
+
+.TP
+.BR \-j ", " \-\-json
+Emit structured JSON output suitable for scripting and automation.
+Notes:
+.IP
+Fields may be added in future versions.
+.br
+Consumers should not assume strict schema stability.
+.br
+\fInull\fR indicates “not applicable.”
+.br
+Boolean values are always \fItrue\fR or \fIfalse\fR.
+
+.TP
+.BR \-x ", " \-\-extend
+Manually extend \fB$PATH\fR to include common admin and system directories during resolution. 
+.br
+The original environment is restored on exit, even on failure. 
+.br
+This option can help detect path shadowing.
+
+.SH OUTPUT
+\fBct\fR reports resolution in two phases:
+
+.TP
+.B Bash Resolution Target
+What Bash selects after applying its command resolution rules.
+
+.TP
+.B Kernel Execution Target
+What executable the kernel actually runs, after resolving symlinks,
+alternatives, ELF interpreters, or shebangs.
+
+Filesystem details may include:
+.IP
+Canonical executable path
+.br
+Symlink chains (including \fI/etc/alternatives\fR)
+.br
+ELF interpreter for binaries
+.br
+Shebang for scripts
+
+.SH LIMITATIONS
+.IP
+Only bare command names are accepted.
+.br
+Resolution behavior depends on the current shell environment.
+.br
+Filesystem inspection may vary by platform and permissions.
+
+.SH REQUIREMENTS
+.IP
+Bash 4.4 or later
+.br
+GNU/Linux system
+.br
+Core utilities: grep, file, cut, head, readlink, readelf, awk
+.br
+Optional: tput (for color output)
+
+.SH ENVIRONMENT
+\fBct\fR temporarily modifies shell state during execution:
+.IP
+\fB$PATH\fR may be extended and restored automatically.
+.br
+\fBextglob\fR may be enabled temporarily.
+.br
+No permanent environment changes are made.
+
+\fBct\fR does not use \fBset -euo pipefail\fR; non-zero exit codes are part
+of normal control flow.
+
+.SH SEE ALSO
+bash(1),
+type(1),
+which(1),
+command(1),
+file(1),
+readelf(1)
+
+.SH AUTHOR
+John Blair
+
+.SH LICENSE
+https://github.com/JB63134/bash_ct/blob/main/LICENSE
+
