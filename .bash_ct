@@ -608,7 +608,6 @@ _ct_print_trace() {
     # Check for secondary entity if keyword won and a shadowed alias or builtin exists
     if [[ "${RES[bash_type]}" == "keyword" ]]; then
         if [[ ${RES[alias_found]} == true ]]; then
-            printf "  ↳ Resolved to: %s\n" "$winner_display"
             printf "          ↳ And: ${__CT_CYAN}Alias → %s${__CT_RESET}\n" "${RES[alias_def]}"  
         fi
     
@@ -1049,7 +1048,6 @@ case "$dir" in
         ;;
 esac
 
-
     path_json+=$'\n    {'
     path_json+="\"dir\": \"$dir\","
     path_json+="\"state\": \"$state\","
@@ -1121,14 +1119,6 @@ _ct_json_string_or_null() {
         printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
     fi
 }
-
-##------------------------------------------------------------------------
-## Function: _ct_json_bool
-## Purpose : get boolean right fool!
-##------------------------------------------------------------------------
-#_ct_json_bool() {
-#    [[ "$1" == true ]] && printf 'true' || printf 'false'
-#}
 
 #------------------------------------------------------------------------
 # End of script
