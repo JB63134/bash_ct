@@ -91,16 +91,18 @@ Each PATH entry reports:
 
 ## Installation
 
-This script is intended to be **sourced into an interactive Bash shell**.
+### 1. Manual Installation
 
-It defines:
-
-* The `ct` function
-* Bash completion for `ct`
-* Supporting helper functions
-
+Clone the repository.
 ```bash
-source .bash_ct
+# Clone the repository.
+git clone https://github.com/JB63134/bash_ca.git /usr/local/bin/bash_ct
+
+# Source the main script in your .bashrc or .bash_profile
+echo "source /usr/local/bin/bash_ct/.bash_ct" >> ~/.bashrc
+
+# Apply changes immediately
+source ~/.bashrc
 ```
 
 ---
