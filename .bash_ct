@@ -477,36 +477,36 @@ _ct_print_trace() {
     _ct_resolve "$cmd" RES PATH_ENTRIES || return 1
     
     if [[ ${RES[bash_type]} == "notfound" ]]; then
-          printf "├─ ${__CT_RED}Unknown or invalid command: ${__CT_CYAN}%s${__CT_RESET}\n" "$cmd"
-          printf "    ↳ Check your spelling and try again\n\n"
+          printf "${__CT_RED}Unknown or invalid command: ${__CT_CYAN}%s${__CT_RESET}\n" "$cmd"
+          printf "  ↳ Check your spelling and try again\n\n"
          return 1
      fi
 
-    printf "├─ Command Trace of ${__CT_CYAN}%s${__CT_RESET}\n" "$cmd"
+    printf "Command Trace of ${__CT_CYAN}%s${__CT_RESET}\n" "$cmd"
 
     if (( __CT_AUTO_EXTEND )); then 
-        printf "    ⎟ \n"
-        printf "    ├─ Not in \$USER \$PATH\n    ├─ Found in system \$PATH %s(auto-extended)%s:\n" "${__CT_YELLOW}" "${__CT_RESET}"
+        printf "\n"
+        printf "Not in \$USER \$PATH\nFound in system \$PATH %s(auto-extended)%s:\n" "${__CT_YELLOW}" "${__CT_RESET}"
     fi
     
-    printf "    ⎟ \n"
+    printf "\n"
 
     # ------------------------------------------------------------
     # Keyword
     # ------------------------------------------------------------
     if [[ ${RES[keyword_found]} == true ]]; then
-        printf "    ├─ Keyword:  -  ${__CT_CYAN}%s → found${__CT_RESET}\n" "$cmd"
+        printf "Keyword:  -  ${__CT_CYAN}%s → found${__CT_RESET}\n" "$cmd"
     else
-        printf "    ├─ Keyword:  -  not found\n"
+        printf "Keyword:  -  not found\n"
     fi
 
     # ------------------------------------------------------------
     # Alias
     # ------------------------------------------------------------
     if [[ ${RES[alias_found]} == true ]]; then 
-            printf "    ├─ Alias:    -  ${__CT_CYAN}%s → found → %s${__CT_RESET}\n" "$cmd" "${RES[alias_def]}"   
+            printf "Alias:    -  ${__CT_CYAN}%s → found → %s${__CT_RESET}\n" "$cmd" "${RES[alias_def]}"   
     else
-        printf "    ├─ Alias:    -  not found\n"
+        printf "Alias:    -  not found\n"
     fi
     
     # ------------------------------------------------------------
@@ -514,14 +514,14 @@ _ct_print_trace() {
     # ------------------------------------------------------------
     if [[ ${RES[function_found]} == true ]]; then
         if [[ ${RES[function_shadowed]} == true ]]; then
-            printf "    ├─ Function: -  ${__CT_GREY}%s → found → Function %s (%s : line %s) [shadowed]${__CT_RESET}\n" \
+            printf "Function: -  ${__CT_GREY}%s → found → Function %s (%s : line %s) [shadowed]${__CT_RESET}\n" \
             "$cmd" "$cmd" "${RES[function_file]}" "${RES[function_line]}"
         else
-            printf "    ├─ Function: -  ${__CT_CYAN}%s → found → Function %s (%s : line %s)${__CT_RESET}\n" \
+            printf "Function: -  ${__CT_CYAN}%s → found → Function %s (%s : line %s)${__CT_RESET}\n" \
             "$cmd" "$cmd" "${RES[function_file]}" "${RES[function_line]}"
         fi
     else
-        printf "    ├─ Function: -  not found\n"
+        printf "Function: -  not found\n"
     fi
 
     # ------------------------------------------------------------
@@ -530,20 +530,20 @@ _ct_print_trace() {
     if [[ ${RES[builtin_found]} == true ]]; then
         if [[ ${RES[builtin_state]} == "enabled" ]]; then
             if [[ ${RES[builtin_shadowed]} == true ]]; then
-                printf "    ├─ Builtin:  -  ${__CT_GREY}%s → found → %s [shadowed]${__CT_RESET}\n" \
+                printf "Builtin:  -  ${__CT_GREY}%s → found → %s [shadowed]${__CT_RESET}\n" \
                        "$cmd" "${RES[builtin_state]}"      
             else
-                printf "    ├─ Builtin:  -  ${__CT_CYAN}%s → found → %s${__CT_RESET}\n" \
+                printf "Builtin:  -  ${__CT_CYAN}%s → found → %s${__CT_RESET}\n" \
                    "$cmd" "${RES[builtin_state]}"
             fi           
         else
-            printf "    ├─ Builtin:  -  ${__CT_GREY}%s → found → %s${__CT_RESET}\n" \
+            printf "Builtin:  -  ${__CT_GREY}%s → found → %s${__CT_RESET}\n" \
             "$cmd" "${RES[builtin_state]}"       
         fi                   
     else
-        printf "    ├─ Builtin:  -  not found\n"
+        printf "Builtin:  -  not found\n"
     fi
-    printf "    ⎟ \n"   
+    printf "\n"   
     
     # ------------------------------------------------------------
     # PATH scan rendering
@@ -552,7 +552,7 @@ _ct_print_trace() {
     # Shadowed entries indicate commands that exist but cannot
     # be reached via bare invocation.
     # ------------------------------------------------------------
-    printf "    ├─ \$PATH in order:\n"
+    printf "\$PATH in order:\n"
 
     for entry in "${PATH_ENTRIES[@]}"; do
         IFS='|' read -r dir state target shadow <<<"$entry"
@@ -568,32 +568,32 @@ _ct_print_trace() {
 
         case "$state" in
             notfound)
-                printf "    ⎟    ↳ %-24s - not found\n" "$dir"
+                printf "  ↳ %-24s - not found\n" "$dir"
                 ;;
             file)
                 if [[ $shadow == true ]]; then
-                    printf "    ⎟    ↳ %-24s - ${__CT_GREY}%s [shadowed]%s${__CT_RESET}\n" "$dir" "$cmd" "$usr_merged"
+                    printf "  ↳ %-24s - ${__CT_GREY}%s [shadowed]%s${__CT_RESET}\n" "$dir" "$cmd" "$usr_merged"
                 else
-                    printf "    ⎟    ↳ %-24s - ${__CT_CYAN}%s found${__CT_RESET}%s\n" "$dir" "$cmd" "$usr_merged"
+                    printf "  ↳ %-24s - ${__CT_CYAN}%s found${__CT_RESET}%s\n" "$dir" "$cmd" "$usr_merged"
                 fi
                 ;;
             symlink)
                 if [[ $shadow == true ]]; then
-                    printf "    ⎟    ↳ %-24s - ${__CT_GREY}%s (symlink) [shadowed]%s${__CT_RESET}\n" "$dir" "$cmd" "$usr_merged"
+                    printf "  ↳ %-24s - ${__CT_GREY}%s (symlink) [shadowed]%s${__CT_RESET}\n" "$dir" "$cmd" "$usr_merged"
                 else
-                    printf "    ⎟    ↳ %-24s - ${__CT_CYAN}%s${__CT_RESET} → ${__CT_YELLOW}%s${__CT_RESET}%s\n" \
+                    printf "  ↳ %-24s - ${__CT_CYAN}%s${__CT_RESET} → ${__CT_YELLOW}%s${__CT_RESET}%s\n" \
                     "$dir" "$cmd" "$target" "$usr_merged"
                 fi
                 ;;
         esac    
     done
 
-    printf "    ⎟ \n"
+    printf "\n"
 
     # ------------------------------------------------------------
     # Bash resolution target
     # ------------------------------------------------------------
-    printf "    ├─ Bash Resolution Target:\n"
+    printf "Bash Resolution Target:\n"
 
     case "${RES[bash_type]}" in
         keyword) winner_display="${__CT_CYAN}Keyword → ${RES[command]}${__CT_RESET}" ;;
@@ -603,66 +603,67 @@ _ct_print_trace() {
         path)     winner_display="${__CT_CYAN}Filesystem → ${RES[kernel_path]}${__CT_RESET}" ;;
         *)        printf "not found\n" ;;
     esac
-    printf "    ⎟    ↳ Resolved to: %s\n" "$winner_display"
+    printf "  ↳ Resolved to: %s\n" "$winner_display"
 
     # Check for secondary entity if keyword won and a shadowed alias or builtin exists
     if [[ "${RES[bash_type]}" == "keyword" ]]; then
         if [[ ${RES[alias_found]} == true ]]; then
-            printf "    ⎟            ↳ And: ${__CT_CYAN}Alias → %s${__CT_RESET}\n" "${RES[alias_def]}"  
+            printf "  ↳ Resolved to: %s\n" "$winner_display"
+            printf "          ↳ And: ${__CT_CYAN}Alias → %s${__CT_RESET}\n" "${RES[alias_def]}"  
         fi
     
         if [[ ${RES[builtin_state]} == "enabled" ]]; then
-            printf "    ⎟            ↳ And: ${__CT_CYAN}Builtin → %s → %s${__CT_RESET}\n"  "${RES[command]}" "${RES[builtin_state]}"
+            printf "          ↳ And: ${__CT_CYAN}Builtin → %s → %s${__CT_RESET}\n"  "${RES[command]}" "${RES[builtin_state]}"
         elif [[ ${RES[builtin_state]} == "disabled" ]]; then
-            printf "    ⎟            ↳ And: ${__CT_GREY}Builtin → %s → %s${__CT_RESET}\n"  "${RES[command]}" "${RES[builtin_state]}"
-            printf "    ⎟    ↳ Note: Builtin implementation is disabled; execution will fail.\n"
+            printf "          ↳ And: ${__CT_GREY}Builtin → %s → %s${__CT_RESET}\n"  "${RES[command]}" "${RES[builtin_state]}"
+            printf "  ↳ Note: Builtin implementation is disabled; execution will fail.\n"
 
         fi    
 
         if [[ ${RES[alias_found]} == true || ${RES[function_found]} == true || ${RES[path_found]} == true ]]; then
-            printf "    ⎟    ↳ Note: Keyword ${__CT_CYAN}'%s'${__CT_RESET} always wins in its reserved context; other commands are ignored.\n" \
+            printf "  ↳ Note: Keyword ${__CT_CYAN}'%s'${__CT_RESET} always wins in its reserved context; other commands are ignored.\n" \
         "${RES[command]}"
         fi
     fi
     
     if [[ ${RES[function_found]} == true && ${RES[function_shadowed]} == true ]]; then
-        printf "    ⎟    ↳ Note: Function ${__CT_CYAN}'%s'${__CT_RESET} is unreachable by bare invocation.\n" "$cmd"
+        printf "  ↳ Note: Function ${__CT_CYAN}'%s'${__CT_RESET} is unreachable by bare invocation.\n" "$cmd"
     fi
     
     if [[ ${RES[builtin_found]} == true && ${RES[builtin_shadowed]} == true ]]; then
-        printf "    ⎟    ↳ Note: Builtin ${__CT_CYAN}'%s'${__CT_RESET} is unreachable by bare invocation.\n" "$cmd"
+        printf "  ↳ Note: Builtin ${__CT_CYAN}'%s'${__CT_RESET} is unreachable by bare invocation.\n" "$cmd"
     fi
     
     # Only print shadowed note for non-builtin
     if [[ ${RES[shadowed_fs]} == true ]]; then
-        printf "    ⎟    ↳ Note: Filesystem executables named ${__CT_CYAN}'%s'${__CT_RESET} are unreachable by bare invocation.\n" "$cmd"
+        printf "  ↳ Note: Filesystem executables named ${__CT_CYAN}'%s'${__CT_RESET} are unreachable by bare invocation.\n" "$cmd"
     fi
 
-    printf "    ⎟ \n"
+    printf "\n"
 
     # ------------------------------------------------------------
     # Kernel execution target
     #
     # Only applies when bash_type == path.
     # ------------------------------------------------------------
-    printf "    ├─ Kernel Execution Target:\n"
+    printf "Kernel Execution Target:\n"
 
     if [[ ${RES[bash_type]} == path ]]; then
         if [[ "${RES[kernel_path]}" != "${RES[kernel_canonical]}" ]]; then
-            printf "    ⎟    ↳ Executable → ${__CT_BPURP}%s${__CT_RESET}\n" "${RES[kernel_canonical]}"
+            printf "  ↳ Executable → ${__CT_BPURP}%s${__CT_RESET}\n" "${RES[kernel_canonical]}"
         else
-            printf "    ⎟    ↳ Executable → ${__CT_CYAN}%s${__CT_RESET}\n" "${RES[kernel_canonical]}"
+            printf "  ↳ Executable → ${__CT_CYAN}%s${__CT_RESET}\n" "${RES[kernel_canonical]}"
         fi
 
         [[ -n ${RES[elf_interp]} ]] && \
-        printf "    ⎟    ↳ ELF interpreter: ${__CT_CYAN}%s${__CT_RESET}\n" "${RES[elf_interp]}"
+        printf "  ↳ ELF interpreter: ${__CT_CYAN}%s${__CT_RESET}\n" "${RES[elf_interp]}"
 
         [[ -n ${RES[shebang]} ]] && \
-        printf "    ⎟    ↳ Shebang: ${__CT_CYAN}%s${__CT_RESET}\n" "${RES[shebang]}"
+        printf "  ↳ Shebang: ${__CT_CYAN}%s${__CT_RESET}\n" "${RES[shebang]}"
 
         # symlink chain
         if [[ -n ${RES[kernel_chain]} ]]; then
-            printf "    ⎟    ↳ Symlink chain:\n"
+            printf "  ↳ Symlink chain:\n"
             IFS=$'\n' read -r -d '' -a chain_lines <<<"${RES[kernel_chain]}" || true
 
             local last_index=$(( ${#chain_lines[@]} - 1 ))
@@ -673,19 +674,18 @@ _ct_print_trace() {
     
                 if (( i == last_index )); then
                     # Final target (kernel executable)
-                    printf "    ⎟         → ${__CT_YELLOW}%s${__CT_RESET} -> ${__CT_BPURP}%s${__CT_RESET}\n" "$src" "$tgt"
+                    printf "       → ${__CT_YELLOW}%s${__CT_RESET} -> ${__CT_BPURP}%s${__CT_RESET}\n" "$src" "$tgt"
                 else
                     # intermediate symlink
-                    printf "    ⎟         → ${__CT_CYAN}%s${__CT_RESET} -> ${__CT_YELLOW}%s${__CT_RESET}\n" "$src" "$tgt"
+                    printf "       → ${__CT_CYAN}%s${__CT_RESET} -> ${__CT_YELLOW}%s${__CT_RESET}\n" "$src" "$tgt"
                 fi
             done
         fi  
     else
-        printf "    ⎟    ↳ NONE\n"
+        printf "  ↳ NONE\n"
     fi
 
-    printf "    ⎟ \n"
-    printf "    └──────────────────────────────────────────\n\n"
+    printf "\n"
 }
 
 #------------------------------------------------------------------------
