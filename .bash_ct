@@ -43,8 +43,8 @@
 # guarantees exhaustive analysis regardless of resolution.
 #-----------------------------------------------------------------------------------------------
 if [[ -z "${BASH_VERSION:-}" ]]; then
-    printf "ct must be sourced or executed by bash.\n" >&2
-    return 1
+  echo "This file must be sourced from bash." >&2    
+  return 1
 fi
 
 __CT_version=4.2.5
