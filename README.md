@@ -33,7 +33,7 @@ It traces the full resolution process—covering aliases, functions, keywords, b
 * Highlights shadowed commands and overrides
 * Performs a full `$PATH` scan, including shadowed or unreachable entries
 * Detects builtin state (enabled vs disabled)
-* Resolves filesystem details: canonical paths, symlink chains, `/etc/alternatives`, ELF interpreters, shebangs
+* Resolves filesystem details: canonical paths, symlink chains, `/etc/alternatives`, usr-merged directories, ELF interpreters, shebangs
 * Safely auto-extends `$PATH` to include admin/system directories
 * Supports `-x` / `--extend` for manual path extension
 * Handles edge cases: reserved keywords, special characters, shadowed functions
