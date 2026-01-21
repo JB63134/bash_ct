@@ -44,7 +44,7 @@
 #-----------------------------------------------------------------------------------------------
 if [[ -z "${BASH_VERSION:-}" ]]; then
     echo "This file must be sourced from bash." >&2
-    return 1 2>/dev/null || exit 1
+    return 1
 fi
 
 __CT_version=4.2.5
