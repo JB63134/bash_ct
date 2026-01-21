@@ -36,12 +36,12 @@ It traces the full resolution process—covering aliases, functions, keywords, b
 * Resolves filesystem details: canonical paths, symlink chains, `/etc/alternatives`, usr-merged directories, ELF interpreters, shebangs
 * Safely auto-extends `$PATH` to include admin/system directories
 * Supports `-x` / `--extend` for manual path extension
-* Handles edge cases: reserved keywords, special characters, shadowed functions
+* Handles edge cases: reserved keywords, special characters
 * Produces color-coded, human-readable output
 * Optional JSON output for scripting and automation
 * Supports tab completion
 * Preserves shell environment state
-* Compatible with Bash ≥ 4.4 and `/usr`-merged systems
+* Compatible with gnu-utils and Bash ≥ 4.4
 * Works in both interactive shells and scripts
 
 ---
@@ -128,7 +128,7 @@ ct python
 ct -j bash
 ```
 
-Invalid (paths are rejected):
+Invalid paths are rejected:
 
 ```bash
 ct /bin/ls
