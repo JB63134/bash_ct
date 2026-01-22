@@ -98,5 +98,64 @@ useradd is /home/jb/bin/useradd
 /home/jb/bin/useradd                          
 
 05:29:51 Thu Jan 22: ~ $ which -a useradd
-/home/jb/bin/useradd                          
+/home/jb/bin/useradd
+
+
+05:55:58 Thu Jan 22: ~ $ ct fg
+Command Trace of fg
+
+Keyword:  -  not found
+Alias:    -  not found
+Function: -  not found
+Builtin:  -  fg → found → enabled
+
+$PATH in order:
+  ↳ /home/jb/bin             - fg [shadowed]
+  ↳ /home/jb/bin/scripts     - not found
+  ↳ /home/jb/.local/bin      - not found
+  ↳ /usr/local/bin           - not found
+  ↳ /usr/bin                 - not found
+  ↳ /bin                     - not found
+  ↳ /usr/local/games         - not found
+  ↳ /usr/games               - not found
+
+Bash Resolution Target:
+  ↳ Resolved to: Builtin → fg → enabled
+  ↳ Note: Filesystem executables named 'fg' are unreachable by bare invocation.
+
+Kernel Execution Target:
+  ↳ NONE                  
+
+05:56:06 Thu Jan 22: ~ $ enable -n fg    # disable the builtin
+
+05:56:30 Thu Jan 22: ~ $ ct fg
+Command Trace of fg
+
+Keyword:  -  not found
+Alias:    -  not found
+Function: -  not found
+Builtin:  -  fg → found → disabled
+
+$PATH in order:
+  ↳ /home/jb/bin             - fg found
+  ↳ /home/jb/bin/scripts     - not found
+  ↳ /home/jb/.local/bin      - not found
+  ↳ /usr/local/bin           - not found
+  ↳ /usr/bin                 - not found
+  ↳ /bin                     - not found
+  ↳ /usr/local/games         - not found
+  ↳ /usr/games               - not found
+
+Bash Resolution Target:
+  ↳ Resolved to: Filesystem → /home/jb/bin/fg
+
+Kernel Execution Target:
+  ↳ Executable → /home/jb/bin/fg
+  ↳ Shebang: /usr/bin/env bash
+
+
+05:56:33 Thu Jan 22: ~ $ 
+
+
+
 ```
