@@ -92,7 +92,7 @@ Each PATH entry reports:
 Clone the repository.
 ```bash
 # Clone the repository.
-git clone https://github.com/JB63134/bash_ca.git /usr/local/bin/bash_ct
+git clone https://github.com/JB63134/bash_ct.git /usr/local/bin/bash_ct
 
 # Source the main script in your .bashrc or .bash_profile
 echo "source /usr/local/bin/bash_ct/.bash_ct" >> ~/.bashrc
