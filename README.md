@@ -1,8 +1,8 @@
 # bash_ct
----
+
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-4.2.10-blue)](https://github.com/JB63134/bash_ca/releases) 
----
+
 
 `ct` (Command Trace) is a Bash command resolution tracer that explains **how Bash resolves a command** and **what the kernel ultimately executes**.
 
