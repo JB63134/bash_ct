@@ -155,7 +155,136 @@ Kernel Execution Target:
 
 
 05:56:33 Thu Jan 22: ~ $ 
+#-------------------------------------------------------------------------------------------------------
+Posix mode:
+22:58:16 Sat Jan 24: ~ $ foo/bar
+Sat Jan 24 10:58:19 PM CST 2026
 
+22:58:19 Sat Jan 24: ~ $ eval
+jb       seat0        2026-01-23 08:21
+jb       tty2         2026-01-23 08:21
+
+22:58:21 Sat Jan 24: ~ $ ct foo/bar
+Command Trace of foo/bar
+
+Keyword:  -  not found
+Alias:    -  not found
+Function: -  foo/bar → found → Function foo/bar (/home/jb/.bash_functions : line 95)
+Builtin:  -  not found
+
+$PATH in order:
+  ↳ /home/jb/bin             - not found
+  ↳ /home/jb/bin/scripts     - not found
+  ↳ /home/jb/.local/bin      - not found
+  ↳ /usr/local/bin           - not found
+  ↳ /usr/bin                 - not found
+  ↳ /bin                     - not found
+  ↳ /usr/local/games         - not found
+  ↳ /usr/games               - not found
+
+Bash Resolution Target:
+  ↳ Resolved to: Function → foo/bar → /home/jb/.bash_functions : line 95
+
+Kernel Execution Target:
+  ↳ NONE
+
+
+22:58:23 Sat Jan 24: ~ $ ct eval 
+Command Trace of eval
+
+Keyword:  -  not found
+Alias:    -  not found
+Function: -  eval → found → Function eval (/home/jb/.bash_functions : line 99)
+Builtin:  -  eval → found → enabled [shadowed]
+
+$PATH in order:
+  ↳ /home/jb/bin             - not found
+  ↳ /home/jb/bin/scripts     - not found
+  ↳ /home/jb/.local/bin      - not found
+  ↳ /usr/local/bin           - not found
+  ↳ /usr/bin                 - not found
+  ↳ /bin                     - not found
+  ↳ /usr/local/games         - not found
+  ↳ /usr/games               - not found
+
+Bash Resolution Target:
+  ↳ Resolved to: Function → eval → /home/jb/.bash_functions : line 99
+  ↳ Note: Builtin 'eval' is unreachable by bare invocation.
+
+Kernel Execution Target:
+  ↳ NONE
+
+
+22:58:26 Sat Jan 24: ~ $ set -o posix
+
+22:58:29 Sat Jan 24: ~ $ ct foo/bar
+Unknown or invalid command: foo/bar
+  ↳ Check your spelling and try again
+
+
+22:58:33 Sat Jan 24: ~ $ ct eval 
+Command Trace of eval
+
+Bash is in POSIX mode:
+POSIX special builtins cannot be shadowed by functions;
+conflicting function names are disallowed.
+
+Keyword:  -  not found
+Alias:    -  not found
+Function: -  not found
+Builtin:  -  eval → found → enabled
+
+$PATH in order:
+  ↳ /home/jb/bin             - not found
+  ↳ /home/jb/bin/scripts     - not found
+  ↳ /home/jb/.local/bin      - not found
+  ↳ /usr/local/bin           - not found
+  ↳ /usr/bin                 - not found
+  ↳ /bin                     - not found
+  ↳ /usr/local/games         - not found
+  ↳ /usr/games               - not found
+
+Bash Resolution Target:
+  ↳ Resolved to: Builtin → eval → enabled
+
+Kernel Execution Target:
+  ↳ NONE
+
+
+22:58:37 Sat Jan 24: ~ $ 
+
+22:59:40 Sat Jan 24: ~ $ ct cd
+Command Trace of cd
+
+Bash is in POSIX mode:
+POSIX special builtins cannot be shadowed by functions;
+conflicting function names are disallowed.
+
+Keyword:  -  not found
+Alias:    -  not found
+Function: -  cd → found → Function cd (/home/jb/.bash_functions : line 26)
+Builtin:  -  cd → found → enabled [shadowed]
+
+$PATH in order:
+  ↳ /home/jb/bin             - cd [shadowed]
+  ↳ /home/jb/bin/scripts     - not found
+  ↳ /home/jb/.local/bin      - not found
+  ↳ /usr/local/bin           - not found
+  ↳ /usr/bin                 - not found
+  ↳ /bin                     - not found
+  ↳ /usr/local/games         - not found
+  ↳ /usr/games               - not found
+
+Bash Resolution Target:
+  ↳ Resolved to: Function → cd → /home/jb/.bash_functions : line 26
+  ↳ Note: Builtin 'cd' is unreachable by bare invocation.
+  ↳ Note: Filesystem executables named 'cd' are unreachable by bare invocation.
+
+Kernel Execution Target:
+  ↳ NONE
+
+
+22:59:43 Sat Jan 24: ~ $ 
 
 
 ```
