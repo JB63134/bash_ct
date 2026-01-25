@@ -1,5 +1,8 @@
 # `bash_ct` Changelog
 
+## V4.2.15
+- Json output-fixed boolean output for posix detection
+
 ## V4.2.10
 - Posix mode detection and rule set added
 
