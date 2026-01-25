@@ -43,11 +43,11 @@
 # guarantees exhaustive analysis regardless of resolution.
 #-----------------------------------------------------------------------------------------------
 if [[ -z "${BASH_VERSION:-}" ]]; then
-  echo "This file must be sourced from bash." >&2    
-  return 1
+    printf "ct must be sourced or executed by bash.\n" >&2
+    return 1
 fi
 
-__CT_version=4.2.5
+__CT_version=4.2.10
 __CT_needed_deps=(grep file cut head readlink readelf awk)
 __CT_optional_deps=(tput)
 __CT_extglob_was=0
@@ -212,6 +212,25 @@ ct() {
 #------------------------------------------------------------------------
 # shellcheck disable=SC2154
 _ct_resolve() {
+
+__CT_POSIX_SPECIAL_BUILTINS=(
+    :
+    .
+    break
+    continue
+    eval
+    exec
+    exit
+    export
+    readonly
+    return
+    set
+    shift
+    times
+    trap
+    unset
+)
+
     local cmd="$1"
     local -n R="$2"      # associative result
     local -n P="$3"      # indexed PATH entries
@@ -228,6 +247,7 @@ _ct_resolve() {
     RES[builtin_shadowed]=false
     RES[keyword_shadowed_alias]=false
     RES[alias_shadowed]=false
+    RES[posix_mode]=false
     
     # ------------------------------------------------------------
     # Edge cases
@@ -253,27 +273,46 @@ _ct_resolve() {
         RES[alias_found]=false
     fi
 
+# ------------------------------------------------------------
+# POSIX special builtin (pre-function precedence)
+# ------------------------------------------------------------
+if (( __CT_POSIX_MODE )) && compgen -b | grep -Fxq -- "$cmd"; then
+    if _ct_is_posix_special_builtin "$cmd"; then
+        RES[builtin_found]=true
+        RES[builtin_state]="enabled"
+        RES[bash_type]="builtin"
+        RES[bash_winner]="$cmd"
+        RES[posix_special]=true
+    fi
+fi
+
+if (( __CT_POSIX_MODE )); then
+    RES[posix_mode]=true
+fi
+  
     # ------------------------------------------------------------
-    # Function
+    # Function (skip if POSIX special builtin already resolved)
     # ------------------------------------------------------------
-    if declare -F "$cmd" &>/dev/null; then
-        RES[function_found]=true
+    if [[ ${RES[posix_special]} != true ]] && declare -F "$cmd" &>/dev/null; then
+        R[function_found]=true
 
         local line file
         shopt -q extdebug || { shopt -s extdebug; local _ext=1; }
         read -r _ line file <<<"$(declare -F "$cmd")"
         [[ $_ext ]] && shopt -u extdebug
 
-        RES[function_file]="${file:-interactive shell}"
-        RES[function_line]="$line"
+        R[function_file]="${file:-interactive shell}"
+        R[function_line]="$line"
 
-        if [[ ${RES[bash_type]} == "alias" ]]; then
-            RES[function_shadowed]=true
-        elif [[ ${RES[bash_type]} == "notfound" ]]; then
-            RES[bash_type]="function"
+        # Mark shadowed if higher precedence exists (alias or keyword)
+        if [[ ${R[bash_type]} =~ ^(alias|keyword|builtin)$ ]]; then
+            R[function_shadowed]=true
+        else
+            R[bash_type]="function"
+            R[function_shadowed]=false
         fi
     else
-        RES[function_found]=false
+        R[function_found]=false
     fi
 
     # ------------------------------------------------------------
@@ -304,11 +343,13 @@ _ct_resolve() {
         fi
 
         # shadowed only if enabled and something higher-precedence exists
-        if [[ ${RES[builtin_state]} == "enabled" && ${RES[bash_type]} =~ ^(alias|function|keyword)$ ]]; then
-            RES[builtin_shadowed]=true
-        else
-            RES[builtin_shadowed]=false
-        fi
+if [[ ${RES[builtin_state]} == "enabled" && \
+      ${RES[bash_type]} =~ ^(alias|function|keyword)$ && \
+      ( __CT_POSIX_MODE -eq 0 || ! $(_ct_is_posix_special_builtin "$cmd") ) ]]; then
+    RES[builtin_shadowed]=true
+fi
+
+
 
         # builtin wins only if enabled and not shadowed, and nothing else resolved yet
         if [[ ${RES[builtin_state]} == "enabled" && ${RES[builtin_shadowed]} == false && ${RES[bash_type]} == "notfound" ]]; then
@@ -320,6 +361,24 @@ _ct_resolve() {
         RES[builtin_state]=null
         RES[builtin_shadowed]=false
     fi
+
+# ------------------------------------------------------------
+# POSIX special builtin precedence
+# ------------------------------------------------------------
+if (( __CT_POSIX_MODE )) && compgen -b | grep -Fxq -- "$cmd"; then
+    if _ct_is_posix_special_builtin "$cmd"; then
+        RES[builtin_found]=true
+        RES[builtin_state]="enabled"
+        RES[bash_type]="builtin"
+        RES[bash_winner]="$cmd"
+
+        # POSIX special builtin shadows function
+        if [[ ${RES[function_found]} == true ]]; then
+            RES[function_shadowed]=true
+        fi
+    fi
+fi
+
 
     
     # Builtin only wins if no higher-precedence Bash entity already resolved
@@ -437,6 +496,18 @@ _ct_resolve() {
 }
 
 #------------------------------------------------------------------------
+# Function: _ct_is_posix_special_builtin
+# Purpose: check if command is a posix special builtin
+#------------------------------------------------------------------------
+_ct_is_posix_special_builtin() {
+    local b
+    for b in "${__CT_POSIX_SPECIAL_BUILTINS[@]}"; do
+        [[ $b == "$1" ]] && return 0
+    done
+    return 1
+}
+
+#------------------------------------------------------------------------
 # Function: _ct_found_in_admin_paths
 # Purpose: check if command exists outside of user path
 #------------------------------------------------------------------------
@@ -493,7 +564,12 @@ _ct_print_trace() {
         printf "\n"
         printf "Not in \$USER \$PATH\nFound in system \$PATH %s(auto-extended)%s:\n" "${__CT_YELLOW}" "${__CT_RESET}"
     fi
-    
+        # Dispatch output
+    if (( __CT_POSIX_MODE )); then
+        printf "\n"
+        printf "Bash is in POSIX mode:\nPOSIX special builtins cannot be shadowed by functions;\nconflicting function names are disallowed.\n"
+  #      printf "The shell will not execute a function whose name contains one or more slashes.\n" 
+    fi
     printf "\n"
 
     # ------------------------------------------------------------
@@ -704,12 +780,25 @@ _ct_startup() {
     if [[ -z "$__CT_OLD_PATH" ]]; then
         __CT_OLD_PATH="$PATH"
     fi
-
+    
+    _ct_bash_posix_mode
+    
     _ct_bash_ver_check
     _ct_check_dependencies __CT_needed_deps __CT_optional_deps 1  || return 1 # 1 = exit if required
     (( __CT_EXTEND_PATH )) && _ct_add_admin_paths
     _ct_enable_extglob
     _ct_setup_colors # Setup tput or ansi
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_bash_posix_mode
+# Purpose : Check if bash posix mode to apply posix rules if needed
+#------------------------------------------------------------------------
+_ct_bash_posix_mode() {
+    __CT_POSIX_MODE=0
+    
+    shopt -qo posix && __CT_POSIX_MODE=1
+    
 }
 
 #------------------------------------------------------------------------
@@ -724,6 +813,7 @@ _ct_exit() {
     __CT_edgecase=0
     __CT_EXTEND_PATH=0
     __CT_AUTO_EXTEND=0
+    __CT_POSIX_MODE=0
 }
 
 #------------------------------------------------------------------------
@@ -1075,9 +1165,10 @@ _ct_json_output() {
         cat <<EOF
 {
   "command": "${RES[command]}",
+  "posix_mode": "${RES[posix_mode]}",
+  "auto_extended": $auto_extended_json,
   "bash_type": $bash_type_json,
   "shadowed_fs": ${RES[shadowed_fs]},
-  "auto_extended": $auto_extended_json,
   "alias": {
     "found": ${RES[alias_found]},
     "definition": $alias_def_json
