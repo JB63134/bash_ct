@@ -47,7 +47,7 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
     return 1
 fi
 
-__CT_version=4.2.10
+__CT_version=4.2.15
 __CT_needed_deps=(grep file cut head readlink readelf awk)
 __CT_optional_deps=(tput)
 __CT_extglob_was=0
@@ -1077,7 +1077,12 @@ _ct_json_output() {
     # Precompute JSON values
     local bash_type_json="${RES[bash_type]:-null}"
     [[ -n "$bash_type_json" && "$bash_type_json" != "null" ]] && bash_type_json="\"$bash_type_json\""
+    
 
+    if (( __CT_POSIX_MODE )); then
+        local posix_mode=true
+    fi
+    
     # auto_extended is true only if automatic PATH extension occurred
     if (( __CT_AUTO_EXTEND )) && [[ -z "${CT_MANUAL_PATH_EXTEND}" ]]; then
         local auto_extended_json=true
@@ -1165,7 +1170,7 @@ _ct_json_output() {
         cat <<EOF
 {
   "command": "${RES[command]}",
-  "posix_mode": "${RES[posix_mode]}",
+  "posix_mode": $posix_mode,
   "auto_extended": $auto_extended_json,
   "bash_type": $bash_type_json,
   "shadowed_fs": ${RES[shadowed_fs]},
