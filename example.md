@@ -288,3 +288,108 @@ Kernel Execution Target:
 
 
 ```
+```
+18:44:13 Tue Jan 27: ~ $ set -o posix
+
+18:44:16 Tue Jan 27: ~ $ alias times='uptime'
+
+18:44:28 Tue Jan 27: ~ $ times
+ 18:44:30 up 4 days, 10:23,  1 user,  load average: 0.22, 0.24, 0.25
+
+18:44:30 Tue Jan 27: ~ $ ct times
+Command Trace of times
+
+Bash is in POSIX mode:
+POSIX special builtins cannot be shadowed by functions;
+conflicting function names are disallowed.
+
+Keyword:  -  not found
+Alias:    -  times → found → times='uptime'
+Function: -  not found
+Builtin:  -  times → found → enabled [shadowed]
+
+$PATH in order:
+  ↳ /home/jb/bin             - times [shadowed]
+  ↳ /home/jb/bin/scripts     - not found
+  ↳ /home/jb/.local/bin      - not found
+  ↳ /usr/local/bin           - not found
+  ↳ /usr/bin                 - not found
+  ↳ /bin                     - not found
+  ↳ /usr/local/games         - not found
+  ↳ /usr/games               - not found
+
+Bash Resolution Target:
+  ↳ Resolved to: Alias → times → times='uptime'
+  ↳ Note: Builtin 'times' is unreachable by bare invocation.
+  ↳ Note: Filesystem executables named 'times' are unreachable by bare invocation.
+
+Kernel Execution Target:
+  ↳ NONE
+
+
+18:44:35 Tue Jan 27: ~ $ enable -n times 
+
+18:45:19 Tue Jan 27: ~ $ ct times
+Command Trace of times
+
+Bash is in POSIX mode:
+POSIX special builtins cannot be shadowed by functions;
+conflicting function names are disallowed.
+
+Keyword:  -  not found
+Alias:    -  times → found → times='uptime'
+Function: -  not found
+Builtin:  -  times → found → disabled
+
+$PATH in order:
+  ↳ /home/jb/bin             - times [shadowed]
+  ↳ /home/jb/bin/scripts     - not found
+  ↳ /home/jb/.local/bin      - not found
+  ↳ /usr/local/bin           - not found
+  ↳ /usr/bin                 - not found
+  ↳ /bin                     - not found
+  ↳ /usr/local/games         - not found
+  ↳ /usr/games               - not found
+
+Bash Resolution Target:
+  ↳ Resolved to: Alias → times → times='uptime'
+  ↳ Note: Filesystem executables named 'times' are unreachable by bare invocation.
+
+Kernel Execution Target:
+  ↳ NONE
+
+
+18:45:23 Tue Jan 27: ~ $ unalias times
+
+18:45:37 Tue Jan 27: ~ $ ct times
+Command Trace of times
+
+Bash is in POSIX mode:
+POSIX special builtins cannot be shadowed by functions;
+conflicting function names are disallowed.
+
+Keyword:  -  not found
+Alias:    -  not found
+Function: -  not found
+Builtin:  -  times → found → disabled
+
+$PATH in order:
+  ↳ /home/jb/bin             - times found
+  ↳ /home/jb/bin/scripts     - not found
+  ↳ /home/jb/.local/bin      - not found
+  ↳ /usr/local/bin           - not found
+  ↳ /usr/bin                 - not found
+  ↳ /bin                     - not found
+  ↳ /usr/local/games         - not found
+  ↳ /usr/games               - not found
+
+Bash Resolution Target:
+  ↳ Resolved to: Filesystem → /home/jb/bin/times
+
+Kernel Execution Target:
+  ↳ Executable → /home/jb/bin/times
+  ↳ Shebang: /usr/bin/env bash
+
+
+18:45:40 Tue Jan 27: ~ $ 
+```
