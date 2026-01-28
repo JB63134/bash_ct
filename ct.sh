@@ -47,7 +47,7 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
     return 1
 fi
 
-__CT_version=4.2.15
+__CT_version=4.2.20
 __CT_needed_deps=(grep file cut head readlink readelf awk)
 __CT_optional_deps=(tput)
 __CT_extglob_was=0
@@ -273,22 +273,19 @@ __CT_POSIX_SPECIAL_BUILTINS=(
         RES[alias_found]=false
     fi
 
-# ------------------------------------------------------------
-# POSIX special builtin (pre-function precedence)
-# ------------------------------------------------------------
-if (( __CT_POSIX_MODE )) && compgen -b | grep -Fxq -- "$cmd"; then
-    if _ct_is_posix_special_builtin "$cmd"; then
-        RES[builtin_found]=true
-        RES[builtin_state]="enabled"
-        RES[bash_type]="builtin"
-        RES[bash_winner]="$cmd"
-        RES[posix_special]=true
+    # ------------------------------------------------------------
+    # POSIX special builtin (pre-function precedence)
+    # ------------------------------------------------------------
+    if (( __CT_POSIX_MODE )) && compgen -b | grep -Fxq -- "$cmd"; then
+        if _ct_is_posix_special_builtin "$cmd"; then
+            RES[builtin_found]=true
+            RES[posix_special]=true
+        fi
     fi
-fi
 
-if (( __CT_POSIX_MODE )); then
-    RES[posix_mode]=true
-fi
+    if (( __CT_POSIX_MODE )); then
+        RES[posix_mode]=true
+    fi
   
     # ------------------------------------------------------------
     # Function (skip if POSIX special builtin already resolved)
@@ -343,13 +340,11 @@ fi
         fi
 
         # shadowed only if enabled and something higher-precedence exists
-if [[ ${RES[builtin_state]} == "enabled" && \
-      ${RES[bash_type]} =~ ^(alias|function|keyword)$ && \
-      ( __CT_POSIX_MODE -eq 0 || ! $(_ct_is_posix_special_builtin "$cmd") ) ]]; then
-    RES[builtin_shadowed]=true
-fi
-
-
+    if [[ ${RES[builtin_state]} == "enabled" && \
+          ${RES[bash_type]} =~ ^(alias|function|keyword)$ && \
+          ( __CT_POSIX_MODE -eq 0 || ! $(_ct_is_posix_special_builtin "$cmd") ) ]]; then
+        RES[builtin_shadowed]=true
+    fi
 
         # builtin wins only if enabled and not shadowed, and nothing else resolved yet
         if [[ ${RES[builtin_state]} == "enabled" && ${RES[builtin_shadowed]} == false && ${RES[bash_type]} == "notfound" ]]; then
@@ -362,25 +357,19 @@ fi
         RES[builtin_shadowed]=false
     fi
 
-# ------------------------------------------------------------
-# POSIX special builtin precedence
-# ------------------------------------------------------------
-if (( __CT_POSIX_MODE )) && compgen -b | grep -Fxq -- "$cmd"; then
-    if _ct_is_posix_special_builtin "$cmd"; then
-        RES[builtin_found]=true
-        RES[builtin_state]="enabled"
-        RES[bash_type]="builtin"
-        RES[bash_winner]="$cmd"
-
-        # POSIX special builtin shadows function
-        if [[ ${RES[function_found]} == true ]]; then
-            RES[function_shadowed]=true
+    # ------------------------------------------------------------
+    # POSIX special builtin precedence
+    # ------------------------------------------------------------
+    if (( __CT_POSIX_MODE )) && compgen -b | grep -Fxq -- "$cmd"; then
+        if _ct_is_posix_special_builtin "$cmd"; then
+            RES[builtin_found]=true
+            # POSIX special builtin shadows function
+            if [[ ${RES[function_found]} == true ]]; then
+                RES[function_shadowed]=true
+            fi
         fi
     fi
-fi
 
-
-    
     # Builtin only wins if no higher-precedence Bash entity already resolved
     if [[ ${RES[builtin_found]} == true &&
         ${RES[builtin_state]} == "enabled" &&
@@ -1028,7 +1017,6 @@ _ct_check_dependencies() {
 #------------------------------------------------------------------------
 # Function: _ct_bash_ver_check
 # Purpose : Enforce minimum Bash version
-#
 # Bash 4.4+ is required for associative arrays and namerefs.
 #------------------------------------------------------------------------
 _ct_bash_ver_check() {
@@ -1078,9 +1066,10 @@ _ct_json_output() {
     local bash_type_json="${RES[bash_type]:-null}"
     [[ -n "$bash_type_json" && "$bash_type_json" != "null" ]] && bash_type_json="\"$bash_type_json\""
     
-
     if (( __CT_POSIX_MODE )); then
         local posix_mode=true
+    else 
+        local posix_mode=false
     fi
     
     # auto_extended is true only if automatic PATH extension occurred
