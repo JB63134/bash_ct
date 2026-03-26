@@ -2,7 +2,10 @@
 #-----------------------------------------------------------------------------------------------
 # Playground aka pg                                                                  
 # Purpose: place to test new crap.  this time it's a Command Resolution & Shadowing Report based on 
-# the resolver function in ct       
+# the resolver function in ct -- caching compgen calls reduced time from 1.7 sec to ~1sec  
+#  for external commands, reduce if [[ ! -x "$p" || ! -f "$p" ]]; then to if [[ ! -x "$p" ]]; then
+# if its executable it is already a file.  save a syscall on each path scan.  time is now ~.65sec
+# parallel execution with ordered output in _pg_conflicts   -> down to .42sec
 #-----------------------------------------------------------------------------------------------
 # Copyright (c) 2026 John Blair
 # Licensed under the MIT License. See LICENSE file for details.        
@@ -16,23 +19,9 @@ fi
 __PG_version=4.3.0
 __PG_needed_deps=(grep file cut head readlink readelf awk)
 __PG_optional_deps=(tput)
+__PG_KEYWORDS=($(compgen -k))
+__PG_BUILTINS=($(compgen -b))
 
-
-complete -F _pg_completion ct
-
-#------------------------------------------------------------------------
-# Function: ct
-# Purpose : User-facing entry point.
-#
-# Behavior:
-# • Parses command-line options
-# • Rejects path-based input
-# • Dispatches to human-readable or JSON output
-#
-# Exit codes:
-# • 0  → successful resolution
-# • 1  → command not found or invalid input
-#------------------------------------------------------------------------
 pg() {
 
     while [[ $# -gt 0 ]]; do
@@ -106,8 +95,6 @@ pg() {
 # shellcheck disable=SC2154
 _pg_resolve() {
 
-__PG_KEYWORDS=($(compgen -k))
-__PG_BUILTINS=($(compgen -b))
 __PG_POSIX_SPECIAL_BUILTINS=(
     :
     .
@@ -171,7 +158,7 @@ __PG_POSIX_SPECIAL_BUILTINS=(
     # ------------------------------------------------------------
     # POSIX special builtin (pre-function precedence)
     # ------------------------------------------------------------
-    if (( __PG_POSIX_MODE )) && compgen -b | grep -Fxq -- "$cmd"; then
+    if (( __PG_POSIX_MODE )) && _pg_cache_compgen "$cmd" __PG_BUILTINS; then
         if _pg_is_posix_special_builtin "$cmd"; then
             RES[builtin_found]=true
             RES[posix_special]=true
@@ -255,7 +242,7 @@ __PG_POSIX_SPECIAL_BUILTINS=(
     # ------------------------------------------------------------
     # POSIX special builtin precedence
     # ------------------------------------------------------------
-    if (( __PG_POSIX_MODE )) && compgen -b | grep -Fxq -- "$cmd"; then
+    if (( __PG_POSIX_MODE )) && _pg_cache_compgen "$cmd" __PG_BUILTINS; then
         if _pg_is_posix_special_builtin "$cmd"; then
             RES[builtin_found]=true
             # POSIX special builtin shadows function
@@ -292,7 +279,7 @@ __PG_POSIX_SPECIAL_BUILTINS=(
         local p="$d/$cmd"
         
         # Skip if not executable
-        if [[ ! -x "$p" || ! -f "$p" ]]; then
+        if [[ ! -x "$p" ]]; then
             P+=("$d|notfound||false")
             continue
         fi
@@ -524,17 +511,43 @@ _pg_bash_ver_check() {
 # Function: _pg_conflicts       Command Resolution & Shadowing Report    
 # Purpose : list all commands that conflict with other command names
 #------------------------------------------------------------------------
-_pg_conflicts() {                            
-    
+#_pg_conflicts() {                            
+#    
+#    _pg_setup_colors
+#    printf "Command Resolution & Shadowing Report:\n" 
+#    printf "This may take a moment\n\n" 
+#    _pg_keyword_conflicts
+#    _pg_alias_conflicts
+#    _pg_function_conflicts
+#    _pg_builtin_conflicts
+#}
+_pg_conflicts() {
     _pg_setup_colors
 
-#    printf "Examining Conflicting Command Names:\n"
-    printf "Command Resolution & Shadowing Report:\n" 
-    printf "This may take a moment\n\n" 
-    _pg_keyword_conflicts
-    _pg_alias_conflicts
-    _pg_function_conflicts
-    _pg_builtin_conflicts
+    printf "Command Resolution & Shadowing Report:\n"
+    printf "This may take a moment\n\n"
+
+    local tmpdir
+    tmpdir=$(mktemp -d) || return 1
+
+    set +m  # disable job control messages
+
+    _pg_keyword_conflicts  > "$tmpdir/keywords" &
+    _pg_alias_conflicts    > "$tmpdir/aliases" &
+    _pg_function_conflicts > "$tmpdir/functions" &
+    _pg_builtin_conflicts  > "$tmpdir/builtins" &
+
+    wait
+
+    set -m  # re-enable (optional, polite in interactive shell)
+
+
+    cat "$tmpdir/keywords"
+    cat "$tmpdir/aliases"
+    cat "$tmpdir/functions"
+    cat "$tmpdir/builtins"
+
+    rm -rf "$tmpdir"
 }
 
 #------------------------------------------------------------------------
@@ -545,7 +558,7 @@ _pg_keyword_conflicts() {
     local kw kinds winner
     printf "Keywords \n"
 
-    while IFS= read -r kw; do
+    for kw in "${__PG_KEYWORDS[@]}"; do
         declare -A RES
         declare -a PATH_ENTRIES
 
@@ -553,9 +566,9 @@ _pg_keyword_conflicts() {
 
         kinds=()
 
-        [[ ${RES[alias_found]} == true ]] && kinds+=("alias")
+        [[ ${RES[alias_found]} == true ]]    && kinds+=("alias")
         [[ ${RES[function_found]} == true ]] && kinds+=("function")
-        [[ ${RES[builtin_found]} == true ]] && kinds+=("builtin")
+        [[ ${RES[builtin_found]} == true ]]  && kinds+=("builtin")
       
         # Detect external presence
         local has_external=false
@@ -572,8 +585,6 @@ _pg_keyword_conflicts() {
         winner="${RES[bash_type]}"
         [[ "$winner" == "path" ]] && winner="external"
         
-        
-        
         if ((${#kinds[@]} > 0)); then
             printf "  Keyword: ${__PG_CYAN}%-11s${__PG_RESET}\n" "$kw"
             
@@ -585,11 +596,10 @@ _pg_keyword_conflicts() {
                     "$(_pg_format_kinds "$winner" "${kinds[@]}")"
             fi
         fi
-    done < <(compgen -k)
+    done
 
     printf "\n"
 }
-
 #------------------------------------------------------------------------
 # Function: _pg_alias_conflicts
 # Purpose : list all aliases that conflict with other command names
@@ -707,7 +717,7 @@ _pg_builtin_conflicts() {
     
     printf "Builtins \n"
 
-    while IFS= read -r bcmd; do
+    for bcmd in "${__PG_BUILTINS[@]}"; do
         declare -A RES
         declare -a PATH_ENTRIES
 
@@ -715,16 +725,13 @@ _pg_builtin_conflicts() {
 
         kinds=()
 
-        # collect other kinds (exclude builtin itself)
         [[ ${RES[alias_found]} == true ]]    && kinds+=("alias")
         [[ ${RES[function_found]} == true ]] && kinds+=("function")
         [[ ${RES[keyword_found]} == true ]]  && kinds+=("keyword")
         
-        # builtin state comes from resolver (not enable parsing)
         local enabled_state="${RES[builtin_state]}"
         [[ "$enabled_state" == "disabled" ]] && enabled_state="(disabled)"
         
-        # detect external presence (not just winner)
         local has_external=false
         for entry in "${PATH_ENTRIES[@]}"; do
             IFS='|' read -r _ state _ _ <<<"$entry"
@@ -735,7 +742,6 @@ _pg_builtin_conflicts() {
         done
         [[ $has_external == true ]] && kinds+=("external")
 
-        # determine winner
         winner="${RES[bash_type]}"
         [[ "$winner" == "path" ]] && winner="external"
 
@@ -744,19 +750,16 @@ _pg_builtin_conflicts() {
             display_winner="${__PG_YELLOW}${winner}${__PG_RESET}"
         fi
 
-        # only show real conflicts
         if ((${#kinds[@]} > 0)); then
             printf "  Builtin: ${__PG_CYAN}%-12s${__PG_RESET} %s\n" "$bcmd" "$enabled_state"
             printf "     ↳ Also defined as: %s\n" \
                 "$(_pg_format_kinds "$winner" "${kinds[@]}")"
             printf "     ↳ Resolution:      %s wins\n\n" "$display_winner"
         fi
-
-    done < <(compgen -b)
+    done
 
     printf "\n"
 }
-
 #------------------------------------------------------------------------
 # Function: _pg_format_kinds
 # Purpose : format output for consistency
