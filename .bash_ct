@@ -4,14 +4,14 @@
 # Purpose: Analyzes a Bash command, alias, builtin, keyword,  function, or binary
 #          Trace command resolution, with shadowed command detection.        
 #-----------------------------------------------------------------------------------------------
-# Copyright (c) 2025 John Blair
+# Copyright (c) 2025-2026 John Blair
 # Licensed under the MIT License. See LICENSE file for details.        
 #-----------------------------------------------------------------------------------------------
 # BEHAVIORAL NOTES:
 #
 # • This script is intended to be SOURCED into an interactive Bash shell.
 # • This script does NOT use `set -euo pipefail`.
-# • PATH is optionally extended during execution to improve discovery of
+# • PATH is may be extended during execution to improve discovery of
 #   administrative and user-level command locations. PATH is restored on exit.
 #
 # • Shell option `extglob` may be enabled temporarily and is restored afterward.
@@ -22,7 +22,8 @@
 #     - shebang parsing
 #     - alternatives system detection
 #
-# • Bare command names only. Paths (e.g. /bin/ls) are rejected.
+# • Bare command names only. 
+#   Paths (e.g. /bin/ls) are rejected.
 #-----------------------------------------------------------------------------------------------
 # AUTO-EXTENDED DISCOVERY (JSON: auto_extended)
 #
@@ -47,10 +48,13 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
     return 1
 fi
 
-__CT_version=4.2.20
+__CT_version=4.3.0
 __CT_needed_deps=(grep file cut head readlink readelf awk)
 __CT_optional_deps=(tput)
 __CT_extglob_was=0
+
+mapfile -t __CT_KEYWORDS < <(compgen -k)
+mapfile -t __CT_BUILTINS < <(compgen -b)
 
 complete -F _ct_completion ct
 
@@ -71,7 +75,8 @@ ct() {
     local __CT_JSON_OUTPUT=0
     local __CT_EXTEND_PATH=0
     local __CT_AUTO_EXTEND=0
-
+    local __CT_CONFLICT=0
+    
     trap '_ct_exit' RETURN
 
     while [[ $# -gt 0 ]]; do
@@ -86,6 +91,10 @@ ct() {
                 _ct_ver
                 return 0
                 ;;
+            --conflict) 
+                __CT_CONFLICT=1
+                shift
+                ;; 
             --json)
                 __CT_JSON_OUTPUT=1
                 shift
@@ -99,6 +108,11 @@ ct() {
                 __CT_EXTEND_PATH=1
                 shift
                 ;;
+            --json--conflict|--conflict--json)  
+                __CT_JSON_OUTPUT=1
+                __CT_CONFLICT=1
+                shift
+                ;; 
             -*)  # short flags, possibly combined like -jx
                 local i
                 for (( i=1; i<${#arg}; i++ )); do
@@ -106,6 +120,7 @@ ct() {
                     case "$flag" in
                         j) __CT_JSON_OUTPUT=1 ;;
                         x) __CT_EXTEND_PATH=1 ;;
+                        c) __CT_CONFLICT=1 ;;
                         h)
                             _ct_usage
                             return 0
@@ -127,7 +142,15 @@ ct() {
                 ;;
         esac
     done
-
+    
+    if [[ $__CT_CONFLICT == 1 ]]; then
+       _ct_conflicts "$__CT_JSON_OUTPUT" "$__CT_EXTEND_PATH"
+       return 0
+    fi
+    
+    # Validate input
+    [[ -z "$1" ]] && _ct_usage && return 0
+    
     # Auto-extend PATH if command not found but exists in admin paths
     if [[ -n "$1" && $__CT_EXTEND_PATH -eq 0 ]]; then
         if ! command -v -- "$1" &>/dev/null; then
@@ -140,9 +163,6 @@ ct() {
 
     # ---- Startup ----  
     _ct_startup "$__CT_EXTEND_PATH"
-    
-    # Validate input
-    [[ -z "$1" ]] && _ct_usage && return 0
     
     # JSON mode rejects path input
     if [[ $__CT_JSON_OUTPUT == 1 ]] && [[ "$1" == */* ]]; then
@@ -240,22 +260,22 @@ __CT_POSIX_SPECIAL_BUILTINS=(
     R=()
     P=()
 
-    RES[command]="$cmd"
-    RES[bash_type]="notfound"
-    RES[shadowed_fs]=false
-    RES[function_shadowed]=false
-    RES[builtin_shadowed]=false
-    RES[keyword_shadowed_alias]=false
-    RES[alias_shadowed]=false
-    RES[posix_mode]=false
+    R[command]="$cmd"
+    R[bash_type]="notfound"
+    R[shadowed_fs]=false
+    R[function_shadowed]=false
+    R[builtin_shadowed]=false
+    R[keyword_shadowed_alias]=false
+    R[alias_shadowed]=false
+    R[posix_mode]=false
     
     # ------------------------------------------------------------
     # Edge cases
     # ------------------------------------------------------------
     case "$cmd" in
         '{'|'}'|'('|')'|'[['|']]'|']'|'.')
-            RES[keyword_found]=true
-            RES[bash_type]="keyword"
+            R[keyword_found]=true
+            R[bash_type]="keyword"
             ;;
     esac
 
@@ -266,31 +286,31 @@ __CT_POSIX_SPECIAL_BUILTINS=(
 
         alias_out=$(alias -- "$cmd" 2>/dev/null) || return
 
-        RES[alias_found]=true
-        RES[alias_def]="$alias_out"
-        RES[bash_type]="alias"
+        R[alias_found]=true
+        R[alias_def]="$alias_out"
+        R[bash_type]="alias"
     else
-        RES[alias_found]=false
+        R[alias_found]=false
     fi
 
     # ------------------------------------------------------------
     # POSIX special builtin (pre-function precedence)
     # ------------------------------------------------------------
-    if (( __CT_POSIX_MODE )) && compgen -b | grep -Fxq -- "$cmd"; then
+    if (( __CT_POSIX_MODE )) && _ct_cache_compgen "$cmd" __CT_BUILTINS; then
         if _ct_is_posix_special_builtin "$cmd"; then
-            RES[builtin_found]=true
-            RES[posix_special]=true
+            R[builtin_found]=true
+            R[posix_special]=true
         fi
     fi
 
     if (( __CT_POSIX_MODE )); then
-        RES[posix_mode]=true
+        R[posix_mode]=true
     fi
   
     # ------------------------------------------------------------
     # Function (skip if POSIX special builtin already resolved)
     # ------------------------------------------------------------
-    if [[ ${RES[posix_special]} != true ]] && declare -F "$cmd" &>/dev/null; then
+    if [[ ${R[posix_special]} != true ]] && declare -F "$cmd" &>/dev/null; then
         R[function_found]=true
 
         local line file
@@ -315,68 +335,68 @@ __CT_POSIX_SPECIAL_BUILTINS=(
     # ------------------------------------------------------------
     # Keyword (higher precedence than builtin)
     # ------------------------------------------------------------
-    if compgen -k | grep -Fxq -- "$cmd"; then
-        RES[keyword_found]=true
-        RES[bash_type]="keyword"
+    if _ct_cache_compgen "$cmd" __CT_KEYWORDS; then
+        R[keyword_found]=true
+        R[bash_type]="keyword" 
     else
-        RES[keyword_found]=false
+        R[keyword_found]=false
     fi
 
-    if [[ ${RES[keyword_found]} == true && ${RES[alias_found]} == true ]]; then
-        RES[keyword_shadowed_alias]=true
+    if [[ ${R[keyword_found]} == true && ${R[alias_found]} == true ]]; then
+        R[keyword_shadowed_alias]=true
     fi
     
     # ------------------------------------------------------------
     # Builtin
     # ------------------------------------------------------------
-    if compgen -b | grep -Fxq -- "$cmd"; then
-        RES[builtin_found]=true
+    if _ct_cache_compgen "$cmd" __CT_BUILTINS; then
+        R[builtin_found]=true
 
         # enabled/disabled state
         if enable -n | grep -Fxq -- "enable -n $cmd"; then
-            RES[builtin_state]="disabled"
+            R[builtin_state]="disabled"
         else
-            RES[builtin_state]="enabled"
+            R[builtin_state]="enabled"
         fi
 
         # shadowed only if enabled and something higher-precedence exists
-    if [[ ${RES[builtin_state]} == "enabled" && \
-          ${RES[bash_type]} =~ ^(alias|function|keyword)$ && \
-          ( __CT_POSIX_MODE -eq 0 || ! $(_ct_is_posix_special_builtin "$cmd") ) ]]; then
-        RES[builtin_shadowed]=true
+    if [[ ${R[builtin_state]} == "enabled" && \
+          ${R[bash_type]} =~ ^(alias|function|keyword)$ && \
+          ( "$__CT_POSIX_MODE" -eq 0 || ! $(_ct_is_posix_special_builtin "$cmd") ) ]]; then
+        R[builtin_shadowed]=true
     fi
 
         # builtin wins only if enabled and not shadowed, and nothing else resolved yet
-        if [[ ${RES[builtin_state]} == "enabled" && ${RES[builtin_shadowed]} == false && ${RES[bash_type]} == "notfound" ]]; then
-            RES[bash_type]="builtin"
-            RES[bash_winner]="$cmd"
+        if [[ ${R[builtin_state]} == "enabled" && ${R[builtin_shadowed]} == false && ${R[bash_type]} == "notfound" ]]; then
+            R[bash_type]="builtin"
+            R[bash_winner]="$cmd"
         fi
     else
-        RES[builtin_found]=false
-        RES[builtin_state]=null
-        RES[builtin_shadowed]=false
+        R[builtin_found]=false
+        R[builtin_state]=null
+        R[builtin_shadowed]=false
     fi
 
     # ------------------------------------------------------------
     # POSIX special builtin precedence
     # ------------------------------------------------------------
-    if (( __CT_POSIX_MODE )) && compgen -b | grep -Fxq -- "$cmd"; then
+    if (( __CT_POSIX_MODE )) && _ct_cache_compgen "$cmd" __CT_BUILTINS; then
         if _ct_is_posix_special_builtin "$cmd"; then
-            RES[builtin_found]=true
+            R[builtin_found]=true
             # POSIX special builtin shadows function
-            if [[ ${RES[function_found]} == true ]]; then
-                RES[function_shadowed]=true
+            if [[ ${R[function_found]} == true ]]; then
+                R[function_shadowed]=true
             fi
         fi
     fi
 
     # Builtin only wins if no higher-precedence Bash entity already resolved
-    if [[ ${RES[builtin_found]} == true &&
-        ${RES[builtin_state]} == "enabled" &&
-        ${RES[builtin_shadowed]} == false &&
-        ${RES[bash_type]} == "notfound" ]]; then
-        RES[bash_type]="builtin"
-        RES[bash_winner]="$cmd"
+    if [[ ${R[builtin_found]} == true &&
+        ${R[builtin_state]} == "enabled" &&
+        ${R[builtin_shadowed]} == false &&
+        ${R[bash_type]} == "notfound" ]]; then
+        R[bash_type]="builtin"
+        R[bash_winner]="$cmd"
     fi
 
     # ------------------------------------------------------------
@@ -397,7 +417,7 @@ __CT_POSIX_SPECIAL_BUILTINS=(
         local p="$d/$cmd"
         
         # Skip if not executable
-        if [[ ! -x "$p" || ! -f "$p" ]]; then
+        if [[ ! -x "$p" ]]; then
             P+=("$d|notfound||false")
             continue
         fi
@@ -410,15 +430,15 @@ __CT_POSIX_SPECIAL_BUILTINS=(
 
         local shadow=false
         # Mark as shadowed if a higher-priority Bash resolution exists
-        if [[ ${RES[bash_type]} =~ ^(alias|function|builtin|keyword)$ ]]; then
+        if [[ ${R[bash_type]} =~ ^(alias|function|builtin|keyword)$ ]]; then
             shadow=true
-            RES[shadowed_fs]=true
+            R[shadowed_fs]=true
         elif (( path_winner_seen )); then
             shadow=true
         else
             path_winner_seen=1
             # Only set bash_type=path if no higher-priority type is set
-            [[ ${RES[bash_type]} == "notfound" ]] && RES[bash_type]="path"
+            [[ ${R[bash_type]} == "notfound" ]] && R[bash_type]="path"
             found_path="$p"
         fi
 
@@ -428,21 +448,21 @@ __CT_POSIX_SPECIAL_BUILTINS=(
     # ------------------------------------------------------------
     # Kernel execution details + alternatives detection
     # ------------------------------------------------------------
-    if [[ ${RES[bash_type]} == "path" && -n $found_path ]]; then
-        RES[kernel_path]="$found_path"
-        RES[kernel_canonical]="$(readlink -f "$found_path")"
-        RES[elf_interp]=""
-        RES[shebang]=""
+    if [[ ${R[bash_type]} == "path" && -n $found_path ]]; then
+        R[kernel_path]="$found_path"
+        R[kernel_canonical]="$(readlink -f "$found_path")"
+        R[elf_interp]=""
+        R[shebang]=""
 
         # ELF interpreter (if ELF binary)
-        if file "${RES[kernel_canonical]}" 2>/dev/null | grep -q ELF; then
-            RES[elf_interp]="$(readelf -l "${RES[kernel_canonical]}" 2>/dev/null \
+        if file "${R[kernel_canonical]}" 2>/dev/null | grep -q ELF; then
+            R[elf_interp]="$(readelf -l "${R[kernel_canonical]}" 2>/dev/null \
                           | awk '/interpreter/ {gsub(/[][]/, "", $NF); print $NF}')"
         fi
 
         # Shebang (if script)
-        if head -1 "${RES[kernel_canonical]}" 2>/dev/null | grep -q '^#!'; then
-            RES[shebang]="$(head -1 "${RES[kernel_canonical]}" | cut -c3-)"
+        if head -1 "${R[kernel_canonical]}" 2>/dev/null | grep -q '^#!'; then
+            R[shebang]="$(head -1 "${R[kernel_canonical]}" | cut -c3-)"
         fi
 
         # Symlink chain (safe string for JSON)
@@ -454,19 +474,19 @@ __CT_POSIX_SPECIAL_BUILTINS=(
             chain+=("$x -> $y")
             x="$y"
         done
-        RES[kernel_chain]=$(printf '%s\n' "${chain[@]}")  # newline-delimited string
+        R[kernel_chain]=$(printf '%s\n' "${chain[@]}")  # newline-delimited string
 
         # Alternatives detection
-        RES[alternatives]=false
-        RES[alternatives_link]=null
-        RES[alternatives_target]=null
+        R[alternatives]=false
+        R[alternatives_link]=null
+        R[alternatives_target]=null
 
         x="$found_path"
         while [[ -L "$x" ]]; do
             if [[ "$x" == /etc/alternatives/* ]]; then
-                RES[alternatives]=true
-                RES[alternatives_link]="$x"
-                RES[alternatives_target]="$(readlink -f "$x")"
+                R[alternatives]=true
+                R[alternatives_link]="$x"
+                R[alternatives_target]="$(readlink -f "$x")"
                 break
             fi
             x="$(readlink -f "$x")"
@@ -475,13 +495,28 @@ __CT_POSIX_SPECIAL_BUILTINS=(
   
     # special edge case
     if [[ $cmd == "." ]]; then
-        RES[bash_type]="keyword"
-        RES[keyword_found]=true
-        RES[builtin_shadowed]=false
+        R[bash_type]="keyword"
+        R[keyword_found]=true
+        R[builtin_shadowed]=false
     fi
     
-    : "${RES[bash_type]:=notfound}"
+    : "${R[bash_type]:=notfound}"
     return 0
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_cache_compgen "$cmd" __CT_KEYWORDS
+# Purpose: avoid abusing compgen for a report mode (multiple commands at once)
+#------------------------------------------------------------------------
+_ct_cache_compgen() {
+    local needle="$1"
+    local -n haystack="$2"
+    local item
+
+    for item in "${haystack[@]}"; do
+        [[ "$item" == "$needle" ]] && return 0
+    done
+    return 1
 }
 
 #------------------------------------------------------------------------
@@ -504,7 +539,7 @@ _ct_found_in_admin_paths() {
     local cmd="$1"
     local d
     
-    _CT_ADMIN_PATHS=(
+    local _CT_ADMIN_PATHS=(
     "/flatpak/bin"
     "/snap/bin"
     "/usr/local/sbin"
@@ -825,7 +860,7 @@ _ct_usage() {
       -h, --help        Show this help text
       -v, --version     Show version and license information
       -j, --json        Emit JSON output suitable for scripting
-
+      -c, --conflict    Environment-wide conflict analysis
 EOF
 }
 
@@ -840,7 +875,7 @@ _ct_ver() {
     
      MIT License
      
-     Copyright (c) 2025 John Blair
+     Copyright (c) 2025-2026 John Blair
 
      Permission is hereby granted, free of charge, to any person obtaining a copy
      of this software and associated documentation files (the "Software"), to deal
@@ -987,7 +1022,7 @@ __CT_RESET_extglob() {
 #------------------------------------------------------------------------
 # Function: _ct_check_dependencies
 # Purpose : Check core and optional dependencies, optionally exit on missing core deps
-# Usage   : _ct_check_dependencies __Ct_needed_deps __Ct_optional_deps [EXIT_ON_MISSING] 0or1
+# Usage   : _ct_check_dependencies __CT_needed_deps __CT_optional_deps [EXIT_ON_MISSING] 0or1
 #------------------------------------------------------------------------
 _ct_check_dependencies() {
     local -n required="$1"
@@ -1096,17 +1131,6 @@ _ct_json_output() {
     local shebang_json="${RES[shebang]:-null}"
     [[ -n "$shebang_json" && "$shebang_json" != "null" ]] && shebang_json="\"$shebang_json\""
 
-    # Convert kernel_chain string to JSON array
-    local chain_json=""
-    if [[ -n "${RES[kernel_chain]}" ]]; then
-        IFS=$'\n'
-        for line in ${RES[kernel_chain]}; do
-            [[ -n "$chain_json" ]] && chain_json+=", "
-            chain_json+="\"$line\""
-        done
-        unset IFS
-    fi
-
     # PATH JSON, one object per line
     path_json="["
     for entry in "${PATH_ENTRIES[@]}"; do
@@ -1154,10 +1178,14 @@ _ct_json_output() {
             first=0
         done <<<"${RES[kernel_chain]}"
     fi
-
+    
+    local datetime
+    datetime=$(date '+%Y-%m-%d %H:%M:%S')
+    
         # Output JSON uuoc
         cat <<EOF
 {
+  "report_time": "$datetime",
   "command": "${RES[command]}",
   "posix_mode": $posix_mode,
   "auto_extended": $auto_extended_json,
@@ -1203,6 +1231,565 @@ _ct_json_string_or_null() {
     else
         printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
     fi
+}
+     
+
+#------------------------------------------------------------------------
+# Function: _ct_conflicts       Command Resolution & Shadowing Report    
+# Purpose : dispatch to json or print output
+#------------------------------------------------------------------------
+_ct_conflicts() {
+    local __CT_JSON_OUTPUT="$1"
+    local __CT_EXTEND_PATH="$2"
+    
+    (( __CT_EXTEND_PATH )) && _ct_add_admin_paths
+    
+    if [[ $__CT_JSON_OUTPUT == 1 ]]; then
+         _ct_conflicts_json
+         return 0
+    fi     
+
+    _ct_conflicts_print
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_conflicts_print       Command Resolution & Shadowing Report    
+# Purpose : list all commands that conflict with other command names
+#------------------------------------------------------------------------
+_ct_conflicts_print() {
+
+    _ct_setup_colors
+   
+    # Create temporary directory
+    local tmpdir
+    tmpdir=$(mktemp -d) || { printf "Failed to create temp dir\n" >&2; return 1; }
+
+    # Ensure cleanup on exit or interruption
+    local old_trap
+    old_trap=$(trap -p EXIT)
+
+    trap 'rm -rf "$tmpdir"; eval "$old_trap"' EXIT
+
+    {  # run all jobs at once.  
+        set +m
+        (_ct_keyword_conflicts  > "$tmpdir/keywords") &
+        (_ct_alias_conflicts    > "$tmpdir/aliases") &
+        (_ct_function_conflicts > "$tmpdir/functions") &
+        (_ct_builtin_conflicts  > "$tmpdir/builtins") &
+        wait
+    } 2>/dev/null # suppress output
+
+    # Re-enable job control 
+    set -m
+
+    # print output in proper order
+    printf "\n"
+    cat "$tmpdir/keywords"
+    cat "$tmpdir/aliases"
+    cat "$tmpdir/functions"
+    cat "$tmpdir/builtins"
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_keyword_conflicts
+# Purpose : list all shell keywords that conflict with other command names
+#------------------------------------------------------------------------
+_ct_keyword_conflicts() {
+    local kw kinds winner
+    
+    printf "Command Resolution & Shadowing Report:\n"
+    printf "This may take a moment\n\n"
+    
+    if [[ $__CT_EXTEND_PATH == 1 ]]; then
+             printf "\$PATH has been manually extended.\n\n"
+    fi     
+    
+    printf "Keywords \n"
+
+    for kw in "${__CT_KEYWORDS[@]}"; do
+        declare -A RES
+        declare -a PATH_ENTRIES
+
+        _ct_resolve "$kw" RES PATH_ENTRIES
+
+        kinds=()
+
+        [[ ${RES[alias_found]} == true ]]    && kinds+=("alias")
+        [[ ${RES[function_found]} == true ]] && kinds+=("function")
+        [[ ${RES[builtin_found]} == true ]]  && kinds+=("builtin")
+      
+        # Detect external presence
+        local has_external=false
+        for entry in "${PATH_ENTRIES[@]}"; do
+            IFS='|' read -r _ state _ _ <<<"$entry"
+            if [[ "$state" != "notfound" ]]; then
+                has_external=true
+                break
+            fi
+        done
+        [[ $has_external == true ]] && kinds+=("external")
+        
+        # determine winner using resolver
+        winner="${RES[bash_type]}"
+        [[ "$winner" == "path" ]] && winner="external"
+        
+        if ((${#kinds[@]} > 0)); then
+            printf "  Keyword: ${__CT_CYAN}%-11s${__CT_RESET}\n" "$kw"
+            
+            if [[ "$winner" == "keyword" ]]; then
+                printf "     ↳ Also defined as: %s\n\n" \
+                    "$(_ct_format_kinds "" "${kinds[@]}")"
+            else
+                printf "     ↳ Also defined as: %s\n\n" \
+                    "$(_ct_format_kinds "$winner" "${kinds[@]}")"
+            fi
+        fi
+    done
+
+    printf "\n"
+}
+#------------------------------------------------------------------------
+# Function: _ct_alias_conflicts
+# Purpose : list all aliases that conflict with other command names
+#------------------------------------------------------------------------
+_ct_alias_conflicts() {
+    local acmd kinds winner
+    printf "Aliases \n"
+
+    while IFS= read -r acmd; do
+        declare -A RES
+        declare -a PATH_ENTRIES
+
+        _ct_resolve "$acmd" RES PATH_ENTRIES
+
+        kinds=()
+
+        # collect other kinds (exclude alias itself)
+        [[ ${RES[function_found]} == true ]] && kinds+=("function")
+        [[ ${RES[builtin_found]} == true ]]  && kinds+=("builtin")
+        [[ ${RES[keyword_found]} == true ]]  && kinds+=("keyword")
+
+        # detect external presence (not just winner)
+        local has_external=false
+        for entry in "${PATH_ENTRIES[@]}"; do
+            IFS='|' read -r _ state _ _ <<<"$entry"
+            if [[ "$state" != "notfound" ]]; then
+                has_external=true
+                break
+            fi
+        done
+        [[ $has_external == true ]] && kinds+=("external")
+ 
+        # determine winner using resolver
+        winner="${RES[bash_type]}"
+        [[ "$winner" == "path" ]] && winner="external"
+
+        local display_winner="$winner"
+        if [[ "$winner" != "alias" ]]; then
+            display_winner="${__CT_YELLOW}${winner}${__CT_RESET}"
+        fi
+
+        # only show real conflicts
+        if ((${#kinds[@]} > 0)); then
+            printf "  Alias: ${__CT_CYAN}%-13s${__CT_RESET}\n" "$acmd"
+            printf "     ↳ Also defined as: %s\n" \
+                "$(_ct_format_kinds "$winner" "${kinds[@]}")"
+            printf "     ↳ Resolution:      %s wins\n\n" "$display_winner"
+        fi
+
+    done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
+
+    printf "\n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_function_conflicts
+# Purpose : list all shell functions that conflict with other command names
+#------------------------------------------------------------------------
+_ct_function_conflicts() {
+    local fname kinds winner
+    printf "Functions \n"
+
+    while IFS= read -r fname; do
+        declare -A RES
+        declare -a PATH_ENTRIES
+
+        _ct_resolve "$fname" RES PATH_ENTRIES
+
+        kinds=()
+
+        # collect other kinds (exclude function itself)
+        [[ ${RES[alias_found]} == true ]]   && kinds+=("alias")
+        [[ ${RES[keyword_found]} == true ]] && kinds+=("keyword")
+        [[ ${RES[builtin_found]} == true ]]  && kinds+=("builtin")
+        
+        # detect external presence (not just winner)
+        local has_external=false
+        for entry in "${PATH_ENTRIES[@]}"; do
+            IFS='|' read -r _ state _ _ <<<"$entry"
+            if [[ "$state" != "notfound" ]]; then
+                has_external=true
+                break
+            fi
+        done
+        [[ $has_external == true ]] && kinds+=("external")
+ 
+        # determine winner using resolver
+        winner="${RES[bash_type]}"
+        [[ "$winner" == "path" ]] && winner="external"
+
+        local display_winner="$winner"
+        if [[ "$winner" != "function" ]]; then
+            display_winner="${__CT_YELLOW}${winner}${__CT_RESET}"
+        fi
+
+        # only show real conflicts
+        if ((${#kinds[@]} > 0)); then
+            printf "  Function: ${__CT_CYAN}%-10s${__CT_RESET}\n" "$fname"
+            printf "     ↳ Also defined as: %s\n" \
+                 "$(_ct_format_kinds "$winner" "${kinds[@]}")"
+            printf "     ↳ Resolution:      %s wins\n\n" "$display_winner"
+        fi
+
+    done < <(declare -F | awk '{print $3}')
+
+    printf "\n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_builtin_conflicts
+# Purpose : list all builtins that conflict with other command names
+#------------------------------------------------------------------------
+_ct_builtin_conflicts() {
+    local bcmd kinds winner
+    
+    printf "Builtins \n"
+
+    for bcmd in "${__CT_BUILTINS[@]}"; do
+        declare -A RES
+        declare -a PATH_ENTRIES
+
+        _ct_resolve "$bcmd" RES PATH_ENTRIES
+
+        kinds=()
+
+        [[ ${RES[alias_found]} == true ]]    && kinds+=("alias")
+        [[ ${RES[function_found]} == true ]] && kinds+=("function")
+        [[ ${RES[keyword_found]} == true ]]  && kinds+=("keyword")
+        
+        local enabled_state="${RES[builtin_state]}"
+        [[ "$enabled_state" == "disabled" ]] && enabled_state="(disabled)"
+        
+        local has_external=false
+        for entry in "${PATH_ENTRIES[@]}"; do
+            IFS='|' read -r _ state _ _ <<<"$entry"
+            if [[ "$state" != "notfound" ]]; then
+                has_external=true
+                break
+            fi
+        done
+        [[ $has_external == true ]] && kinds+=("external")
+
+        winner="${RES[bash_type]}"
+        [[ "$winner" == "path" ]] && winner="external"
+
+        local display_winner="$winner"
+        if [[ "$winner" != "builtin" ]]; then
+            display_winner="${__CT_YELLOW}${winner}${__CT_RESET}"
+        fi
+
+        if ((${#kinds[@]} > 0)); then
+            printf "  Builtin: ${__CT_CYAN}%-12s${__CT_RESET} %s\n" "$bcmd" "$enabled_state"
+            printf "     ↳ Also defined as: %s\n" \
+                "$(_ct_format_kinds "$winner" "${kinds[@]}")"
+            printf "     ↳ Resolution:      %s wins\n\n" "$display_winner"
+        fi
+    done
+
+    printf "\n"
+}
+#------------------------------------------------------------------------
+# Function: _ct_format_kinds
+# Purpose : format output for consistency
+#------------------------------------------------------------------------
+_ct_format_kinds() {
+    local winner="$1"
+    shift
+
+    local seen=()
+    local ordered=()
+    local k base note
+
+    for k in "$@"; do
+        base="${k%%(*}"
+        note=""
+
+        if [[ "$base" != "$winner" ]]; then
+            note="(shadowed)"
+        fi
+
+        k="$base$note"
+        [[ ! " ${seen[*]} " =~ $k ]] && seen+=("$k")
+    done
+
+    local order=(alias function builtin keyword external)
+    for o in "${order[@]}"; do
+        for s in "${seen[@]}"; do
+            [[ "$s" == "$o"* ]] && ordered+=("$s")
+        done
+    done
+
+    (IFS=", "; echo "${ordered[*]}")
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_conflicts_json
+# Purpose : display resolution_&_shadowing_report as JSON
+#------------------------------------------------------------------------
+_ct_conflicts_json() {
+    local kw acmd fname bcmd
+    
+    # Create temporary directory
+    local tmpdir
+    tmpdir=$(mktemp -d) || { printf "Failed to create temp dir\n" >&2; return 1; }
+
+    # Ensure cleanup on exit or interruption
+    trap 'rm -rf "$tmpdir"' EXIT
+
+    {
+        set +m
+        (_ct_conflicts_json_keywords  > "$tmpdir/keywords") &
+        (_ct_conflicts_json_aliases   > "$tmpdir/aliases") &
+        (_ct_conflicts_json_functions > "$tmpdir/functions") &
+        (_ct_conflicts_json_builtins > "$tmpdir/builtins") &
+        wait
+    } 2>/dev/null
+    
+    # Re-enable job control  
+    set -m
+    
+    # Output results in order
+    printf "\n"
+    cat "$tmpdir/keywords"
+    cat "$tmpdir/aliases"
+    cat "$tmpdir/functions"
+    cat "$tmpdir/builtins"
+}
+ 
+#------------------------------------------------------------------------
+# Function: _ct_conflicts_json_keywords 
+# Purpose :  JSON keyword output
+#------------------------------------------------------------------------
+_ct_conflicts_json_keywords() {
+
+    printf '{\n'
+    printf '  "report_time": "%s",\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+
+    if [[ $__CT_EXTEND_PATH == 1 ]]; then
+        printf '  "message": "$PATH has been manually extended."\n'
+    fi    
+    
+    printf '  "resolution_&_shadowing_report": {\n'
+    printf '    "keywords": [\n'
+    local first=1
+    for kw in "${__CT_KEYWORDS[@]}"; do
+        declare -A RES
+        declare -a PATH_ENTRIES
+        _ct_resolve "$kw" RES PATH_ENTRIES
+
+        local kinds=()
+
+        [[ ${RES[alias_found]} == true ]]    && kinds+=("alias")
+        [[ ${RES[function_found]} == true ]] && kinds+=("function")
+        [[ ${RES[builtin_found]} == true ]]  && kinds+=("builtin")
+
+        local has_external=false
+        for entry in "${PATH_ENTRIES[@]}"; do
+            IFS='|' read -r _ state _ _ <<<"$entry"
+            [[ "$state" != "notfound" ]] && { has_external=true; break; }
+        done
+        [[ $has_external == true ]] && kinds+=("external")
+
+        ((${#kinds[@]} == 0)) && continue
+
+        ((first)) || printf ',\n'
+        first=0
+
+        printf '      {\n'
+        printf '        "name": "%s",\n' "$kw"
+        printf '        "winner": "%s",\n' "${RES[bash_type]}"
+        printf '        "also_defined_as": ['
+        local i
+        for ((i=0;i<${#kinds[@]};i++)); do
+            printf '"%s"%s' "${kinds[i]}" "$([[ $i -lt $((${#kinds[@]}-1)) ]] && echo ',')"
+        done
+        printf ']\n'
+        printf '      }'
+    done
+    printf '\n    ],\n'
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_conflicts_json_aliases  
+# Purpose :  JSON alias output
+#------------------------------------------------------------------------
+_ct_conflicts_json_aliases() {
+    printf '    "aliases": [\n'
+    first=1
+    while IFS= read -r acmd; do
+        declare -A RES
+        declare -a PATH_ENTRIES
+        _ct_resolve "$acmd" RES PATH_ENTRIES
+
+        local kinds=()
+        [[ ${RES[function_found]} == true ]] && kinds+=("function")
+        [[ ${RES[builtin_found]} == true ]]  && kinds+=("builtin")
+        [[ ${RES[keyword_found]} == true ]]  && kinds+=("keyword")
+
+        local has_external=false
+        for entry in "${PATH_ENTRIES[@]}"; do
+            IFS='|' read -r _ state _ _ <<<"$entry"
+            [[ "$state" != "notfound" ]] && { has_external=true; break; }
+        done
+        [[ $has_external == true ]] && kinds+=("external")
+
+        ((${#kinds[@]} == 0)) && continue
+
+        ((first)) || printf ',\n'
+        first=0
+        
+        printf '      {\n'
+        printf '        "name": "%s",\n' "$acmd"
+        printf '        "winner": "%s",\n' "${RES[bash_type]}"
+        printf '        "also_defined_as": ['
+
+        local first_kind=1
+        local k
+        for k in "${kinds[@]}"; do
+            ((first_kind)) || printf ',\n                            '
+            first_kind=0
+
+            local shadowed=true
+            [[ "$k" == "${RES[bash_type]}" ]] && shadowed=false
+
+            printf '{ "type": "%s", "shadowed": %s }' "$k" "$shadowed"
+        done
+
+        printf ']\n'
+        printf '      }'
+    done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
+    printf '\n    ],\n'
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_conflicts_json_functions  
+# Purpose :  JSON function output
+#------------------------------------------------------------------------
+_ct_conflicts_json_functions() {
+    printf '    "functions": [\n'
+    first=1
+    while IFS= read -r fname; do
+        declare -A RES
+        declare -a PATH_ENTRIES
+        _ct_resolve "$fname" RES PATH_ENTRIES
+
+        local kinds=()
+        [[ ${RES[alias_found]} == true ]]   && kinds+=("alias")
+        [[ ${RES[keyword_found]} == true ]] && kinds+=("keyword")
+        [[ ${RES[builtin_found]} == true ]] && kinds+=("builtin")
+
+        local has_external=false
+        for entry in "${PATH_ENTRIES[@]}"; do
+            IFS='|' read -r _ state _ _ <<<"$entry"
+            [[ "$state" != "notfound" ]] && { has_external=true; break; }
+        done
+        [[ $has_external == true ]] && kinds+=("external")
+
+        ((${#kinds[@]} == 0)) && continue
+
+        ((first)) || printf ',\n'
+        first=0
+
+        printf '      {\n'
+        printf '        "name": "%s",\n' "$fname"
+        printf '        "winner": "%s",\n' "${RES[bash_type]}"
+        printf '        "also_defined_as": ['
+
+        local first_kind=1
+        local k
+        for k in "${kinds[@]}"; do
+            ((first_kind)) || printf ',\n                            '
+            first_kind=0
+
+            local shadowed=true
+            [[ "$k" == "${RES[bash_type]}" ]] && shadowed=false
+
+            printf '{ "type": "%s", "shadowed": %s }' "$k" "$shadowed"
+        done
+
+        printf ']\n'
+        printf '      }'
+    done < <(declare -F | awk '{print $3}')
+    printf '\n    ],\n'
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_conflicts_json_builtins
+# Purpose :  JSON builtin output
+#------------------------------------------------------------------------
+_ct_conflicts_json_builtins() {
+    printf '    "builtins": [\n'
+    first=1
+    for bcmd in "${__CT_BUILTINS[@]}"; do
+        declare -A RES
+        declare -a PATH_ENTRIES
+        _ct_resolve "$bcmd" RES PATH_ENTRIES
+
+        local kinds=()
+        [[ ${RES[alias_found]} == true ]]    && kinds+=("alias")
+        [[ ${RES[function_found]} == true ]] && kinds+=("function")
+        [[ ${RES[keyword_found]} == true ]]  && kinds+=("keyword")
+
+        local has_external=false
+        for entry in "${PATH_ENTRIES[@]}"; do
+            IFS='|' read -r _ state _ _ <<<"$entry"
+            [[ "$state" != "notfound" ]] && { has_external=true; break; }
+        done
+        [[ $has_external == true ]] && kinds+=("external")
+
+        ((${#kinds[@]} == 0)) && continue
+
+        ((first)) || printf ',\n'
+        first=0
+        
+        # Normalize winner: treat "path" as "external"
+        local winner="${RES[bash_type]}"
+        [[ "$winner" == "path" ]] && winner="external"
+    
+        printf '      {\n'
+        printf '        "name": "%s",\n' "$bcmd"
+        printf '        "state": "%s",\n' "${RES[builtin_state]}"
+        printf '        "winner": "%s",\n' "$winner"
+        printf '        "also_defined_as": ['
+
+        local first_kind=1
+        local k
+        for k in "${kinds[@]}"; do
+            ((first_kind)) || printf ',\n                            '
+            first_kind=0
+
+            local shadowed=true
+            [[ "$k" == "$winner" ]] && shadowed=false
+
+            printf '{ "type": "%s", "shadowed": %s }' "$k" "$shadowed"
+        done
+
+        printf ']\n'
+        printf '      }'
+    done
+    printf '\n    ]\n'
+    printf '  }\n'
+    printf '}\n'
 }
 
 #------------------------------------------------------------------------

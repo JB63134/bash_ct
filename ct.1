@@ -1,23 +1,29 @@
-.TH CT 1 "January 2026" "ct 4.2.5" "User Commands"
+.TH CT 1 "March 2026" "ct 4.3.0" "User Commands"
+
 .SH NAME
-ct \- trace Bash command resolution and kernel execution
+ct \- trace Bash command resolution and detect command conflicts
 
 .SH SYNOPSIS
 .B ct
 [\fIoptions\fR] \fIcommand\fR
 .br
-(command must be a bare name, not a path)
+.B ct
+.B \-c
+[\fIoptions\fR]
 
 .SH DESCRIPTION
 \fBct\fR (Command Trace) analyzes how Bash resolves a command name and what executable the kernel ultimately runs.
 
 It traces the full Bash command resolution process, including aliases,
-functions, keywords, builtins, and external executables. It also reports
-shadowed commands, overrides, PATH scanning results, and filesystem
-indirection such as symlinks, alternatives and usr-merged directories.
+functions, keywords, builtins, and external executables. It reports
+shadowing, overrides, and filesystem indirection such as symlinks,
+alternatives, and usr-merged directory layouts.
 
 The command argument must be a bare command name. Paths such as
 \fI/bin/ls\fR or \fI./script\fR are rejected.
+
+When invoked with \fB\-c\fR, \fBct\fR performs environment-wide conflict
+analysis instead of tracing a single command.
 
 .SH OPTIONS
 .TP
@@ -31,11 +37,12 @@ Display version and license information and exit.
 .TP
 .BR \-j ", " \-\-json
 Emit structured JSON output suitable for scripting and automation.
+
 Notes:
 .IP
 Fields may be added in future versions.
 .br
-Consumers should not assume strict schema stability.
+Schema stability is not guaranteed.
 .br
 \fInull\fR indicates “not applicable.”
 .br
@@ -43,54 +50,63 @@ Boolean values are always \fItrue\fR or \fIfalse\fR.
 
 .TP
 .BR \-x ", " \-\-extend
-Manually extend \fB$PATH\fR to include common admin and system directories during resolution. 
+Manually extend \fB$PATH\fR to include common system and admin directories during resolution.
 .br
-The original environment is restored on exit, even on failure. 
-.br
-This option can help detect path shadowing.
-
-.SH OUTPUT
-\fBct\fR reports resolution in two phases:
+The original environment is restored on exit, even on failure.
 
 .TP
-.B Bash Resolution Target
-What Bash selects after applying its command resolution rules.
+.BR \-c ", " \-\-conflict
+Run environment-wide command conflict analysis.
 
-.TP
-.B Kernel Execution Target
-What executable the kernel actually runs, after resolving symlinks,
-alternatives, ELF interpreters, or shebangs.
+.SH CONFLICT MODE
+In \fB\-c\fR mode, \fBct\fR scans shell-defined command namespaces:
 
-Filesystem details may include:
 .IP
-Canonical executable path
+keywords
 .br
-Symlink chains (including \fI/etc/alternatives\fR)
+aliases
 .br
-ELF interpreter for binaries
+functions
 .br
-Shebang for scripts
+builtins
+
+Only shell-defined symbols are considered.
+
+External executables in \fB$PATH\fR are not part of resolution logic.
+They are only checked for presence and reported as indicators (e.g. external(shadowed)).
+
+Each name is evaluated against Bash resolution rules to determine:
+.IP
+definition sources
+.br
+precedence
+.br
+shadowed (unreachable) definitions
+
+This mode is intended for detecting naming collisions in shell environments.
 
 .SH LIMITATIONS
 .IP
 Only bare command names are accepted.
 .br
-Resolution behavior depends on the current shell environment.
+Behavior depends on the current shell environment.
 .br
 Filesystem inspection may vary by platform and permissions.
+.br
+Conflict analysis may be slow in large or heavily customized environments.
+.br
+PATH-based executable resolution is excluded from conflict analysis by design.
 
 .SH REQUIREMENTS
-.IP
-Bash 4.4 or later
+Bash ≥ 4.4
 .br
-GNU/Linux system
+GNU/Linux
 .br
-Core utilities: grep, file, cut, head, readlink, readelf, awk
-.br
-Optional: tput (for color output)
+coreutils: grep, file, cut, head, readlink, readelf, awk
 
 .SH ENVIRONMENT
 \fBct\fR temporarily modifies shell state during execution:
+
 .IP
 \fB$PATH\fR may be extended and restored automatically.
 .br
@@ -98,11 +114,11 @@ Optional: tput (for color output)
 .br
 No permanent environment changes are made.
 
-\fBct\fR does not use \fBset -euo pipefail\fR; non-zero exit codes are part
-of normal control flow.
+\fBct\fR does not enforce strict shell error modes (\fBset -euo pipefail\fR); non-zero exit codes are part of normal operation.
 
 .SH SEE ALSO
 bash(1),
+man(1),
 type(1),
 which(1),
 command(1),
@@ -114,4 +130,3 @@ John Blair
 
 .SH LICENSE
 https://github.com/JB63134/bash_ct/blob/main/LICENSE
-
