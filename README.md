@@ -82,7 +82,7 @@ Also checks whether those names exist as external commands in `$PATH`.
 * Colorized human-readable output
 * Tab completion support
 * Safe environment handling (restores `$PATH`, shell options)
-* Bash ≥ 4.4 compatible
+
 
 ---
 ## JSON Output
