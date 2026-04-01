@@ -65,7 +65,7 @@ Key behavior
 * Focuses on name collisions, not full resolution tracing
 * External commands are reported only as presence indicators
 * Does not perform a full $PATH scan thus avoids excessive noise
-    and avoids misleading conflicts caused by PATH precedence
+    and misleading conflicts caused by PATH precedence
 
 ---
 
