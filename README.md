@@ -3,181 +3,161 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-4.3.0-blue)](https://github.com/JB63134/bash_ct/releases)
 
-`ct` (Command Trace) is a Bash command analysis tool that explains:
+`ct` (Command Trace) is a Bash command resolution tracer that explains **how Bash resolves a command** and **what the kernel ultimately executes**.
 
-* **how Bash resolves a command**
-* **what the kernel ultimately executes**
+It traces the full resolution process—covering aliases, functions, keywords, builtins, and external executables—while exposing shadowed commands, overrides, and filesystem indirection.
 
-It provides visibility into shell behavior, including resolution order, shadowing, and filesystem execution details.
+`ct` combines and extends `type`, `which`, `command -v`, and `file`, providing visibility into Bash resolution order, `$PATH` shadowing, and kernel execution details.
 
 ---
-## Core Concept
 
-`ct` operates in **two distinct modes**:
+## What `ct` shows
 
-### 1. Command Trace Mode (default)
-
-```bash
-ct <command>
-```
-
-Analyzes a single command and reports:
-
-* Bash resolution path (alias, function, keyword, builtin, PATH)
-* Full `$PATH` scan (including shadowed and unreachable entries)
-* Shadowed commands and overrides
-* Kernel execution target (actual executable)
+* Bash resolution order for aliases, functions, keywords, builtins, and executables
+* Shadowed commands and overrides (e.g. aliases or functions hiding binaries)
+* Full `$PATH` scan, including shadowed or unreachable entries
+* Clear separation of **Bash resolution targets** vs **kernel execution targets**
 * Filesystem execution details:
-  * canonical paths
-  * symlink chains (including `/etc/alternatives`)
-  * ELF interpreters (for binaries)
-  * shebangs (for scripts)
 
-Clear separation of:
+  * Canonical executable paths
+  * Symlink chains (including `/etc/alternatives`)
+  * ELF interpreters for binaries
+  * Shebangs for scripts
+* Optional JSON output for scripting and automation
 
-* **Bash Resolution Target**
-* **Kernel Execution Target**
+`ct` is intended for understanding **why** a command resolves the way it does—not just **what** it resolves to.
 
-### 2. Conflict Analysis Mode
+---
 
-```bash
+## Features (Quick Summary)
+
+* Traces Bash command resolution for aliases, functions, keywords, builtins, and executables
+* Shows Bash vs kernel execution targets
+* Highlights shadowed commands and overrides
+* Performs a full `$PATH` scan, including shadowed or unreachable entries
+* Detects builtin state (enabled vs disabled)
+* Resolves filesystem details: canonical paths, symlink chains, `/etc/alternatives`, usr-merged directories, ELF interpreters, shebangs
+* Safely auto-extends `$PATH` to include admin/system directories
+* Supports `-x` / `--extend` for manual path extension
+* Handles edge cases: reserved keywords, special characters
+* Produces color-coded, human-readable output
+* Optional JSON output for scripting and automation
+* Supports tab completion
+* Preserves shell environment state
+* Compatible with gnu-utils and Bash ≥ 4.4
+* Works in both interactive shells and scripts
+
+---
+## NEW  `-c` mode
+
+Enviroment Conflict Analysis Report
+
 ct -c
-```
+Scans the current shell environment and reports command name collisions across:
 
-Scans the current shell environment and reports **command name collisions** across:
+* aliases
+* functions
+* builtins
+* keywords
+* and checks whether those names exist as external commands in $PATH.
 
-* aliases  
-* functions  
-* builtins  
-* keywords  
-
-Also checks whether those names exist as external commands in `$PATH`.
-
-#### Key behavior
-
-* Focuses on **name collisions**, not full resolution tracing  
-* External commands are reported only as **presence indicators**  
-* Does **not perform a full `$PATH` scan**
-  * avoids excessive noise  
-  * avoids misleading conflicts caused by PATH precedence  
-* Reflects actual **Bash resolution rules**
+Key behavior
+* Focuses on name collisions, not full resolution tracing
+* External commands are reported only as presence indicators
+* Does not perform a full $PATH scan thus avoids excessive noise
+    and avoids misleading conflicts caused by PATH precedence
 
 ---
-## Features
 
-* Bash command resolution tracing
-* Environment-wide conflict detection (`-c`)
-* Accurate shadowing detection
-* Full `$PATH` visibility (trace mode only)
-* Separation of Bash vs kernel execution
-* Filesystem introspection:
-  * canonical paths
-  * symlink chains
-  * `/etc/alternatives`
-  * ELF interpreter detection
-  * shebang parsing
-* Builtin state detection (enabled/disabled)
-* Automatic and manual `$PATH` extension
-* JSON output for scripting (`-j`)
-* Colorized human-readable output
-* Tab completion support
-* Safe environment handling (restores `$PATH`, shell options)
-
-
----
 ## JSON Output
 
-JSON mode is intended for scripting and inspection.
-
-```bash
-ct -j ls
-ct -c --json
-```
+JSON output is intended for scripting and inspection.
 
 ### Notes
 
-* Fields may change across versions  
-* Do not assume strict schema stability  
-* `null` = not applicable  
-* Booleans are always `true` / `false`  
+* Fields may be added in future versions
+* Users should not assume strict schema stability across major versions
+* `null` indicates “not applicable”
+* Boolean fields are always `true` or `false`
 
-### Command Trace JSON includes:
+### PATH Entries
 
-* resolution type (`alias`, `function`, `builtin`, `keyword`, `path`)
-* PATH scan results
-* kernel execution details
-* shadowing indicators
+Each PATH entry reports:
 
-### Conflict JSON includes:
-
-* command name
-* resolution winner
-* alternate definitions
-* shadowed status
+* Directory
+* State (`notfound`, `file`, `symlink`)
+* Symlink target (if applicable)
+* Shadowed status
+* `/usr`-merge detection
 
 ---
+
 ## Requirements
 
-### Core dependencies
+**Core dependencies**
 
 * `grep`, `file`, `cut`, `head`, `readlink`, `readelf`, `awk`
 
-### Optional
+**Optional (for color output)**
 
-* `tput` (color output)
+* `tput`
 
-### Shell
+**Bash version**
 
 * Bash ≥ 4.4
 
 ---
+
 ## Installation
 
-### Manual
+### 1. Manual Installation
 
+Clone the repository.
 ```bash
+# Clone the repository.
 git clone https://github.com/JB63134/bash_ct.git /usr/local/bin/bash_ct
 
+# Source the main script in your .bashrc or .bash_profile
 echo "source /usr/local/bin/bash_ct/.bash_ct" >> ~/.bashrc
+
+# Apply changes immediately
 source ~/.bashrc
 ```
 
 ---
+
 ## Usage
 
 ```text
 ct [options] command
-ct -c [options]
 ```
 
 ### Options
 
-| Option             | Description                        |
-|------------------|------------------------------------|
-| `-h`, `--help`    | Show usage information             |
-| `-v`, `--version` | Show version and license           |
-| `-j`, `--json`    | Emit JSON output                   |
-| `-x`, `--extend`  | Extend `$PATH` for discovery       |
-| `-c`, `--conflict`| Run environment conflict analysis  |
-
+| Option            | Description                         |
+| ----------------- | ------------------------------------|
+| `-h`, `--help`    | Show usage information              |
+| `-v`, `--version` | Show version and license            |
+| `-j`, `--json`    | Emit JSON output                    |
+| `-x`, `--extend`  | Extend `$PATH` manually             |
+| `-c`, `--conflict`| Environment conflict analysis report|
 ---
-## Examples
 
-### Command trace
+## Examples
 
 ```bash
 ct ls
 ct python
 ct -j bash
+ct -x useradd
 ```
-
-### Conflict analysis
 
 ```bash
 ct -c
-ct -c --json
+ct -c -j 
+ct -c -j -x
+ct -cjx
 ```
-
 ---
 ## Behavior Notes
 
