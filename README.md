@@ -1,7 +1,7 @@
 # bash_ct
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-4.3.0-blue)](https://github.com/JB63134/bash_ct/releases)
+[![Version](https://img.shields.io/badge/version-4.4.0-blue)](https://github.com/JB63134/bash_ct/releases)
 
 `ct` (Command Trace) is a Bash command resolution tracer that explains **how Bash resolves a command** and **what the kernel ultimately executes**.
 
@@ -48,7 +48,7 @@ It traces the full resolution process—covering aliases, functions, keywords, b
 * Works in both interactive shells and scripts
 
 ---
-## NEW  `-c` mode
+##  `-c` mode
 
 Enviroment Conflict Analysis Report
 
@@ -96,7 +96,7 @@ Each PATH entry reports:
 
 **Core dependencies**
 
-* `grep`, `file`, `cut`, `head`, `readlink`, `readelf`, `awk`
+*  `readlink`, `readelf`, `mktemp`, `stat`
 
 **Optional (for color output)**
 
@@ -140,7 +140,7 @@ ct [options] command
 | `-v`, `--version` | Show version and license            |
 | `-j`, `--json`    | Emit JSON output                    |
 | `-x`, `--extend`  | Extend `$PATH` manually             |
-| `-c`, `--conflict`| Environment conflict analysis report|
+| `-c`, `--conflict`| Environment conflict analysis report| 
 ---
 
 ## Examples
