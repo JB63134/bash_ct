@@ -1,7 +1,19 @@
 # `bash_ct` Changelog
+## V4.4.0
+
+### Improved
+
+#### Code cleanup
+* fix json.  on autoextended path the message needed a comma. remove dependency on date
+* fixed some json output path and external were both showing up depending on edge case.
+* ELF header code, shebang detection and builtin enabled/disabled detection, are now native bash. 
+* conflict reports switched to compgen to remove dependency on awk.
+* removed dependencies for grep head awk sed - switch to native bash 
+* tried to clean up posix mode behaviour.  
+* passed shellcheck.
+
 
 ## V4.3.0
-
 ### Added
 
 #### Conflict Analysis Mode (`-c`)
@@ -46,11 +58,12 @@
 
 * fixed `nameref` usage for cleaner internal references
 * Reduced reliance on global variables
+* Improved function encapsulation and readability
 * `_ct_resolve` optimized for reuse in both trace and conflict modes
   
   * now caches `compgen` results
   * reduces repeated shell calls
-  * improved performance for `-c` mode in large environments
+  * improved performance in `-c` mode on large environments
 ---
 
 ## V4.2.15

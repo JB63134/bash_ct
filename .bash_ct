@@ -48,10 +48,27 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
     return 1
 fi
 
-__CT_version=4.3.0
-__CT_needed_deps=(grep file cut head readlink readelf awk)
+__CT_version=4.4.0
+__CT_needed_deps=(readlink readelf mktemp stat)
 __CT_optional_deps=(tput)
 __CT_extglob_was=0
+__CT_POSIX_SPECIAL_BUILTINS=(
+    :
+    .
+    break
+    continue
+    eval
+    exec
+    exit
+    export
+    readonly
+    return
+    set
+    shift
+    times
+    trap
+    unset
+)
 
 mapfile -t __CT_KEYWORDS < <(compgen -k)
 mapfile -t __CT_BUILTINS < <(compgen -b)
@@ -232,25 +249,6 @@ ct() {
 #------------------------------------------------------------------------
 # shellcheck disable=SC2154
 _ct_resolve() {
-
-__CT_POSIX_SPECIAL_BUILTINS=(
-    :
-    .
-    break
-    continue
-    eval
-    exec
-    exit
-    export
-    readonly
-    return
-    set
-    shift
-    times
-    trap
-    unset
-)
-
     local cmd="$1"
     local -n R="$2"      # associative result
     local -n P="$3"      # indexed PATH entries
@@ -294,23 +292,21 @@ __CT_POSIX_SPECIAL_BUILTINS=(
     fi
 
     # ------------------------------------------------------------
-    # POSIX special builtin (pre-function precedence)
+    # POSIX mode / special builtin precedence
     # ------------------------------------------------------------
-    if (( __CT_POSIX_MODE )) && _ct_cache_compgen "$cmd" __CT_BUILTINS; then
-        if _ct_is_posix_special_builtin "$cmd"; then
-            R[builtin_found]=true
-            R[posix_special]=true
-        fi
-    fi
-
     if (( __CT_POSIX_MODE )); then
         R[posix_mode]=true
     fi
   
     # ------------------------------------------------------------
-    # Function (skip if POSIX special builtin already resolved)
+    # Function
+    #
+    # In POSIX mode, POSIX special builtins have precedence over
+    # functions. Bash will not use the function as the command
+    # resolution target.
     # ------------------------------------------------------------
-    if [[ ${R[posix_special]} != true ]] && declare -F "$cmd" &>/dev/null; then
+    if declare -F "$cmd" &>/dev/null; then
+
         R[function_found]=true
 
         local line file
@@ -321,13 +317,20 @@ __CT_POSIX_SPECIAL_BUILTINS=(
         R[function_file]="${file:-interactive shell}"
         R[function_line]="$line"
 
-        # Mark shadowed if higher precedence exists (alias or keyword)
-        if [[ ${R[bash_type]} =~ ^(alias|keyword|builtin)$ ]]; then
+        # POSIX special builtin wins over function
+        if (( __CT_POSIX_MODE )) && _ct_is_posix_special_builtin "$cmd"; then
             R[function_shadowed]=true
+
+        # Normal Bash precedence:
+        # alias > function > builtin > PATH
+        elif [[ ${R[bash_type]} =~ ^(alias|keyword|builtin)$ ]]; then
+            R[function_shadowed]=true
+
         else
             R[bash_type]="function"
             R[function_shadowed]=false
         fi
+
     else
         R[function_found]=false
     fi
@@ -353,50 +356,33 @@ __CT_POSIX_SPECIAL_BUILTINS=(
         R[builtin_found]=true
 
         # enabled/disabled state
-        if enable -n | grep -Fxq -- "enable -n $cmd"; then
-            R[builtin_state]="disabled"
-        else
-            R[builtin_state]="enabled"
-        fi
+        R[builtin_state]="enabled"
+        while read -r _ _ disabledbuiltin; do
+            if [[ $disabledbuiltin == "$cmd" ]]; then
+                R[builtin_state]="disabled"
+                break
+            fi
+        done < <(enable -n)
 
         # shadowed only if enabled and something higher-precedence exists
-    if [[ ${R[builtin_state]} == "enabled" && \
-          ${R[bash_type]} =~ ^(alias|function|keyword)$ && \
-          ( "$__CT_POSIX_MODE" -eq 0 || ! $(_ct_is_posix_special_builtin "$cmd") ) ]]; then
-        R[builtin_shadowed]=true
-    fi
+        if [[ ${R[builtin_state]} == "enabled" &&
+              ${R[bash_type]} =~ ^(alias|function|keyword)$ &&
+              ( "$__CT_POSIX_MODE" -eq 0 || ! $(_ct_is_posix_special_builtin "$cmd") ) ]]; then
+            R[builtin_shadowed]=true
+        fi
 
-        # builtin wins only if enabled and not shadowed, and nothing else resolved yet
-        if [[ ${R[builtin_state]} == "enabled" && ${R[builtin_shadowed]} == false && ${R[bash_type]} == "notfound" ]]; then
+        # builtin wins only if enabled and not shadowed,
+        # and nothing higher-precedence resolved
+        if [[ ${R[builtin_state]} == "enabled" &&
+              ${R[builtin_shadowed]} == false &&
+              ${R[bash_type]} == "notfound" ]]; then
             R[bash_type]="builtin"
             R[bash_winner]="$cmd"
         fi
+
     else
         R[builtin_found]=false
         R[builtin_state]=null
-        R[builtin_shadowed]=false
-    fi
-
-    # ------------------------------------------------------------
-    # POSIX special builtin precedence
-    # ------------------------------------------------------------
-    if (( __CT_POSIX_MODE )) && _ct_cache_compgen "$cmd" __CT_BUILTINS; then
-        if _ct_is_posix_special_builtin "$cmd"; then
-            R[builtin_found]=true
-            # POSIX special builtin shadows function
-            if [[ ${R[function_found]} == true ]]; then
-                R[function_shadowed]=true
-            fi
-        fi
-    fi
-
-    # Builtin only wins if no higher-precedence Bash entity already resolved
-    if [[ ${R[builtin_found]} == true &&
-        ${R[builtin_state]} == "enabled" &&
-        ${R[builtin_shadowed]} == false &&
-        ${R[bash_type]} == "notfound" ]]; then
-        R[bash_type]="builtin"
-        R[bash_winner]="$cmd"
     fi
 
     # ------------------------------------------------------------
@@ -455,14 +441,24 @@ __CT_POSIX_SPECIAL_BUILTINS=(
         R[shebang]=""
 
         # ELF interpreter (if ELF binary)
-        if file "${R[kernel_canonical]}" 2>/dev/null | grep -q ELF; then
-            R[elf_interp]="$(readelf -l "${R[kernel_canonical]}" 2>/dev/null \
-                          | awk '/interpreter/ {gsub(/[][]/, "", $NF); print $NF}')"
-        fi
+        R[elf_interp]=""
+
+        while IFS= read -r line; do
+            case $line in
+                *"Requesting program interpreter:"*)
+                    line=${line#*: }
+                    line=${line#[}
+                    line=${line%]}
+                    R[elf_interp]=$line
+                    break
+                    ;;
+            esac
+        done < <(readelf -l "${R[kernel_canonical]}" 2>/dev/null)
 
         # Shebang (if script)
-        if head -1 "${R[kernel_canonical]}" 2>/dev/null | grep -q '^#!'; then
-            R[shebang]="$(head -1 "${R[kernel_canonical]}" | cut -c3-)"
+        if IFS= read -r line < "${R[kernel_canonical]}" 2>/dev/null &&
+            [[ $line == '#!'* ]]; then
+            R[shebang]=$line
         fi
 
         # Symlink chain (safe string for JSON)
@@ -860,7 +856,8 @@ _ct_usage() {
       -h, --help        Show this help text
       -v, --version     Show version and license information
       -j, --json        Emit JSON output suitable for scripting
-      -c, --conflict    Environment-wide conflict analysis
+      -c, --conflict    Show all conflicting commands in the namespace
+     
 EOF
 }
 
@@ -970,6 +967,7 @@ _ct_add_admin_paths() {
 _ct_restore_path() {
     if [[ -n "$__CT_OLD_PATH" ]]; then
         PATH="$__CT_OLD_PATH"
+        unset __CT_OLD_PATH
     fi
 }
 
@@ -1044,6 +1042,7 @@ _ct_check_dependencies() {
         printf "%b\n" "${__CT_RED}Warning: Missing REQUIRED tools: ${missing_required[*]}${__CT_RESET}"
         if (( exit_on_missing )); then
             printf "%b\n" "${__CT_RED}Cannot continue analysis without core dependencies.${__CT_RESET}"
+            return 1
         fi
     fi
     return 0
@@ -1180,7 +1179,7 @@ _ct_json_output() {
     fi
     
     local datetime
-    datetime=$(date '+%Y-%m-%d %H:%M:%S')
+    datetime=$(printf '%(%Y-%m-%dT%H:%M:%S%z)T\n' -1)
     
         # Output JSON uuoc
         cat <<EOF
@@ -1229,10 +1228,12 @@ _ct_json_string_or_null() {
     if [[ -z $1 || $1 == "null" ]]; then
         printf 'null'
     else
-        printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+        local s=$1
+        s=${s//\\/\\\\}
+        s=${s//\"/\\\"}
+        printf '"%s"' "$s"
     fi
 }
-     
 
 #------------------------------------------------------------------------
 # Function: _ct_conflicts       Command Resolution & Shadowing Report    
@@ -1348,6 +1349,7 @@ _ct_keyword_conflicts() {
 
     printf "\n"
 }
+
 #------------------------------------------------------------------------
 # Function: _ct_alias_conflicts
 # Purpose : list all aliases that conflict with other command names
@@ -1397,8 +1399,7 @@ _ct_alias_conflicts() {
             printf "     ↳ Resolution:      %s wins\n\n" "$display_winner"
         fi
 
-    done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
-
+    done < <(compgen -A alias)
     printf "\n"
 }
 
@@ -1451,8 +1452,8 @@ _ct_function_conflicts() {
             printf "     ↳ Resolution:      %s wins\n\n" "$display_winner"
         fi
 
-    done < <(declare -F | awk '{print $3}')
-
+    done < <(compgen -A function)
+    
     printf "\n"
 }
 
@@ -1581,15 +1582,15 @@ _ct_conflicts_json() {
 # Purpose :  JSON keyword output
 #------------------------------------------------------------------------
 _ct_conflicts_json_keywords() {
-
     printf '{\n'
-    printf '  "report_time": "%s",\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf '  "report_time": "%s",\n' "$(printf '%(%Y-%m-%dT%H:%M:%S%z)T\n' -1)"
 
     if [[ $__CT_EXTEND_PATH == 1 ]]; then
-        printf '  "message": "$PATH has been manually extended."\n'
+        # shellcheck disable=SC2016
+        printf '  "message": "$PATH has been manually extended.",\n'
     fi    
     
-    printf '  "resolution_&_shadowing_report": {\n'
+    printf '  "resolution_and_shadowing_report": {\n'
     printf '    "keywords": [\n'
     local first=1
     for kw in "${__CT_KEYWORDS[@]}"; do
@@ -1658,9 +1659,12 @@ _ct_conflicts_json_aliases() {
         ((first)) || printf ',\n'
         first=0
         
+        local winner="${RES[bash_type]}"
+        [[ "$winner" == "path" ]] && winner="external"
+
         printf '      {\n'
-        printf '        "name": "%s",\n' "$acmd"
-        printf '        "winner": "%s",\n' "${RES[bash_type]}"
+        printf '        "name": %s,\n' "$(_ct_json_string_or_null "$acmd")"
+        printf '        "winner": %s,\n' "$(_ct_json_string_or_null "$winner")"
         printf '        "also_defined_as": ['
 
         local first_kind=1
@@ -1670,14 +1674,16 @@ _ct_conflicts_json_aliases() {
             first_kind=0
 
             local shadowed=true
-            [[ "$k" == "${RES[bash_type]}" ]] && shadowed=false
+            [[ "$k" == "$winner" ]] && shadowed=false
 
             printf '{ "type": "%s", "shadowed": %s }' "$k" "$shadowed"
         done
 
         printf ']\n'
         printf '      }'
-    done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
+ 
+done < <(compgen -A alias)
+    
     printf '\n    ],\n'
 }
 
@@ -1710,6 +1716,9 @@ _ct_conflicts_json_functions() {
         ((first)) || printf ',\n'
         first=0
 
+        local winner="${RES[bash_type]}"
+        [[ "$winner" == "path" ]] && winner="external"
+
         printf '      {\n'
         printf '        "name": "%s",\n' "$fname"
         printf '        "winner": "%s",\n' "${RES[bash_type]}"
@@ -1722,14 +1731,14 @@ _ct_conflicts_json_functions() {
             first_kind=0
 
             local shadowed=true
-            [[ "$k" == "${RES[bash_type]}" ]] && shadowed=false
+            [[ "$k" == "$winner" ]] && shadowed=false
 
             printf '{ "type": "%s", "shadowed": %s }' "$k" "$shadowed"
         done
 
         printf ']\n'
         printf '      }'
-    done < <(declare -F | awk '{print $3}')
+    done < <(compgen -A function)
     printf '\n    ],\n'
 }
 
