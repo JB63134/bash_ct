@@ -3,7 +3,7 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-4.4.0-blue)](https://github.com/JB63134/bash_ct/releases)
 
-** Bash Command Resolution Trace**
+**Bash Command Resolution Trace**
 
 **`ct` (Command Trace) is a Bash command resolution tracer.**
 
@@ -73,7 +73,6 @@ This makes `ct` useful when a command behaves differently from what was expected
 **The Bash resolution target and the kernel execution target are not necessarily the same thing**
 
 For an ELF executable, the path Bash resolves may pass through filesystem indirection before the kernel loads the executable and its ELF interpreter:
-
 
 ```text
 Bash Resolution Target
