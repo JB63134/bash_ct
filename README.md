@@ -7,9 +7,9 @@
 
 **`ct` (Command Trace) is a Bash command resolution tracer.**
 
-It examines how a command name resolves and traces the subsequent filesystem and execution layers.
+It examines how a command name resolves and traces the subsequent filesystem and execution layers, bringing them together into a single resolution model.
 
-`ct` brings these layers together into a single resolution model.
+The goal is to answer not only **what command Bash will use**, but **why it resolves that way and what ultimately executes**.
 
 ---
 
