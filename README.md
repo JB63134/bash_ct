@@ -7,7 +7,9 @@
 
 **`ct` (Command Trace) is a Bash command resolution tracer.**
 
-It examines how a command name resolves and traces the subsequent filesystem and execution layers, bringing them together into a single resolution model.
+It examines how a command name resolves and traces the subsequent filesystem and execution layers.
+
+`ct` brings these layers together into a single resolution model.
 
 ---
 
@@ -70,7 +72,7 @@ This makes `ct` useful when a command behaves differently from what was expected
 
 **The Bash resolution target and the kernel execution target are not necessarily the same thing**
 
-For an ELF executable, the path Bash resolves can lead through filesystem indirection before the kernel loads the executable and its ELF interpreter:
+For an ELF executable, the path Bash resolves may pass through filesystem indirection before the kernel loads the executable and its ELF interpreter:
 
 
 ```text
