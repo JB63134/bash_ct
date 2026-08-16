@@ -3,7 +3,7 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-4.4.0-blue)](https://github.com/JB63134/bash_ct/releases)
 
-# Bash Command Resolution Trace
+** Bash Command Resolution Trace**
 
 **`ct` (Command Trace) is a Bash command resolution tracer.**
 
@@ -403,7 +403,7 @@ The goal is not merely to answer:
 
 but:
 
-> **What does `foo` mean in this Bash environment, what is hiding behind it, what else could it resolve to, and what will actually execute?**
+> **What does `foo` mean in this Bash environment, what is hiding behind it, what else could it resolve to, and, when applicable, what will actually execute?**
 
 ---
 
