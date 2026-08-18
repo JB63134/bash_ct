@@ -1,132 +1,339 @@
-.TH CT 1 "March 2026" "ct 4.3.0" "User Commands"
-
+.TH CT 1 "August 2026" "ct 4.4.05" "User Commands"
 .SH NAME
-ct \- trace Bash command resolution and detect command conflicts
-
+ct \- trace Bash command resolution and analyze command conflicts
 .SH SYNOPSIS
 .B ct
 [\fIoptions\fR] \fIcommand\fR
 .br
 .B ct
-.B \-c
+.BR -c
 [\fIoptions\fR]
-
 .SH DESCRIPTION
-\fBct\fR (Command Trace) analyzes how Bash resolves a command name and what executable the kernel ultimately runs.
+.B ct
+(Command Trace) analyzes how Bash resolves a command name and, when
+an external executable is selected, traces subsequent filesystem and
+execution layers.
 
-It traces the full Bash command resolution process, including aliases,
-functions, keywords, builtins, and external executables. It reports
-shadowing, overrides, and filesystem indirection such as symlinks,
-alternatives, and usr-merged directory layouts.
+For a command name,
+.B ct
+examines Bash command namespaces including aliases, functions, reserved
+keywords, builtins, and external executables found through
+.BR $PATH .
+It can also identify shadowed executables and filesystem indirection
+such as symbolic links, alternatives, and usr-merged directory layouts.
 
-The command argument must be a bare command name. Paths such as
-\fI/bin/ls\fR or \fI./script\fR are rejected.
+For executable files,
+.B ct
+can inspect the interpreter specified by an ELF executable or script
+shebang and report the relationship between the Bash resolution target
+and the eventual execution target.
 
-When invoked with \fB\-c\fR, \fBct\fR performs environment-wide conflict
-analysis instead of tracing a single command.
+The command argument must be a bare command name. Pathnames such as
+.I /bin/ls
+and
+.I ./script
+are not accepted.
+
+.B ct
+operates against the current Bash environment. Its results therefore
+depend on aliases, functions, builtins, shell options, and
+.BR $PATH
+visible to the invoking shell.
+
+When
+.B -c
+is specified,
+.B ct
+performs environment-wide command conflict analysis instead of tracing
+a single command.
 
 .SH OPTIONS
 .TP
-.BR \-h ", " \-\-help
+.BR -h ", " --help
 Display usage information and exit.
 
 .TP
-.BR \-v ", " \-\-version
+.BR -v ", " --version
 Display version and license information and exit.
 
 .TP
-.BR \-j ", " \-\-json
+.BR -j ", " --json
 Emit structured JSON output suitable for scripting and automation.
+JSON output is available for normal command tracing and conflict
+analysis.
 
-Notes:
-.IP
-Fields may be added in future versions.
-.br
-Schema stability is not guaranteed.
-.br
-\fInull\fR indicates “not applicable.”
-.br
-Boolean values are always \fItrue\fR or \fIfalse\fR.
-
-.TP
-.BR \-x ", " \-\-extend
-Manually extend \fB$PATH\fR to include common system and admin directories during resolution.
-.br
-The original environment is restored on exit, even on failure.
+The JSON schema may change between versions. Fields may be added in
+future releases. A JSON
+.I null
+value indicates that a field is not applicable. Boolean values are
+represented as JSON
+.I true
+or
+.I false.
 
 .TP
-.BR \-c ", " \-\-conflict
+.BR -x ", " --extend
+Force search-path extension during command discovery to include common
+system and administrative directories that may not be present in the
+current environment.
+
+Normally,
+.B ct
+automatically extends the search path when a command cannot be found
+in the user's
+.BR $PATH .
+The
+.B -x
+option forces this extension even when the command has already been
+found, allowing
+.B ct
+to discover executable files that are shadowed by an earlier
+.BR $PATH
+entry.
+
+The extension is used for discovery and analysis. The original
+.BR $PATH
+is restored before
+.B ct
+returns.
+
+.TP
+.BR -c ", " --conflict
 Run environment-wide command conflict analysis.
 
-.SH CONFLICT MODE
-In \fB\-c\fR mode, \fBct\fR scans shell-defined command namespaces:
+This mode identifies command names for which multiple Bash command
+definitions are present, including aliases, functions, builtins, and
+reserved keywords. External executables are examined separately to
+identify executables shadowed by those definitions.
+
+.TP
+.BR -cjx
+Combined short options may be supplied without separating the flags.
+
+.SH COMMAND RESOLUTION
+When Bash encounters a command name, resolution can involve several
+command namespaces.
+
+.B ct
+examines:
 
 .IP
-keywords
+aliases
+.br
+functions
+.br
+reserved keywords
+.br
+builtins
+.br
+external executables
+.PP
+
+For external commands,
+.B ct
+also examines the filesystem and execution layers that follow command
+selection.
+
+These may include:
+
+.IP
+.BR $PATH
+search order
+.br
+shadowed executables
+.br
+symbolic-link chains
+.br
+.BR /etc/alternatives
+.br
+usr-merged directory relationships
+.br
+ELF interpreters
+.br
+script shebangs
+.PP
+
+This allows
+.B ct
+to distinguish the command Bash selects from what the operating system
+subsequently loads or executes.
+
+.SH PATH DISCOVERY
+.B ct
+examines
+.BR $PATH
+in search order and can report executable candidates that are
+shadowed by an earlier entry.
+
+Some system commands reside in administrative directories such as
+.I /usr/sbin
+or
+.I /sbin
+that may not be present in an ordinary user's
+.BR $PATH .
+Normally,
+.B ct
+automatically extends the search path when a command cannot be found
+in the user's
+.BR $PATH .
+The
+.B -x
+option forces this path extension even when the command has already
+been found, allowing
+.B ct
+to discover executable files in administrative directories that are
+shadowed by an earlier
+.BR $PATH
+entry.
+The original
+.BR $PATH
+is restored when analysis completes.
+
+.SH CONFLICT MODE
+.B ct -c
+performs a different analysis from normal command tracing.
+
+It examines command names supplied by the current shell's command
+namespaces:
+
+.IP
+reserved keywords
 .br
 aliases
 .br
 functions
 .br
 builtins
+.PP
 
-Only shell-defined symbols are considered.
+It determines which definitions are present for each name and evaluates 
+their precedence under Bash command resolution rules.
 
-External executables in \fB$PATH\fR are not part of resolution logic.
-They are only checked for presence and reported as indicators (e.g. external(shadowed)).
+External executables are not treated as competing command definitions 
+in this mode. They are checked only to determine whether an executable 
+exists that can be shadowed by a shell definition.
 
-Each name is evaluated against Bash resolution rules to determine:
-.IP
-definition sources
-.br
-precedence
-.br
-shadowed (unreachable) definitions
+For example, an external executable may be reported as
+.B external(shadowed)
+when a shell-defined command name prevents that executable from being
+selected.
 
-This mode is intended for detecting naming collisions in shell environments.
+Conflict mode is intended to identify command-name collisions within the
+current Bash environment.
+
+.SH ENVIRONMENT
+.B ct
+operates on the current shell environment and may temporarily modify
+shell state while performing analysis.
+
+.B $PATH
+may be temporarily extended during discovery.
+
+Temporary modifications are restored before
+.B ct
+returns.
+
+.B ct
+does not permanently modify the invoking shell environment.
+
+Non-zero command results may represent normal analysis conditions;
+.B ct
+does not require or enforce
+.BR "set -e" ,
+.BR "set -u" ,
+or
+.BR "pipefail"
+in the invoking shell.
 
 .SH LIMITATIONS
 .IP
 Only bare command names are accepted.
 .br
-Behavior depends on the current shell environment.
+Results depend on the current Bash environment.
 .br
-Filesystem inspection may vary by platform and permissions.
+Filesystem information depends on platform layout and available
+permissions.
 .br
-Conflict analysis may be slow in large or heavily customized environments.
+Conflict analysis may require more time in large or heavily customized
+shell environments.
 .br
-PATH-based executable resolution is excluded from conflict analysis by design.
+PATH-based executable candidates are not treated as competing command
+definitions in conflict mode.
 
 .SH REQUIREMENTS
-Bash ≥ 4.4
+.B ct
+requires:
+
+.IP
+Bash 4.4 or newer
 .br
 GNU/Linux
 .br
-coreutils: grep, file, cut, head, readlink, readelf, awk
-
-.SH ENVIRONMENT
-\fBct\fR temporarily modifies shell state during execution:
-
-.IP
-\fB$PATH\fR may be extended and restored automatically.
+readlink
 .br
-\fBextglob\fR may be enabled temporarily.
+readelf
 .br
-No permanent environment changes are made.
+mktemp
+.br
+stat
 
-\fBct\fR does not enforce strict shell error modes (\fBset -euo pipefail\fR); non-zero exit codes are part of normal operation.
+.PP
+.B tput
+is optional and is used for terminal color support when available.
+
+.SH EXAMPLES
+.TP
+.B ct awk
+Trace the resolution of
+.BR awk .
+
+.TP
+.B ct cd
+Inspect a shell builtin and other possible command definitions.
+
+.TP
+.B ct python
+Trace command resolution and inspect executable and filesystem
+indirection.
+
+.TP
+.B ct -j awk
+Produce JSON output for a command resolution trace.
+
+.TP
+.B ct -x useradd
+Force discovery of administrative executables that may be shadowed by
+a command already found in the user's
+.BR $PATH .
+
+.TP
+.B ct -c
+Analyze command-name conflicts in the current Bash environment.
+
+.TP
+.B ct -cj
+Produce JSON conflict analysis.
+
+.SH EXIT STATUS
+.B ct
+returns a non-zero status when command analysis encounters an error or
+when an explicitly requested operation cannot be completed.
+
+A non-zero result does not necessarily indicate that the analyzed
+command itself is invalid or unusable.
 
 .SH SEE ALSO
-bash(1),
-man(1),
-type(1),
-which(1),
-command(1),
-file(1),
-readelf(1)
+.BR bash (1),
+.BR type (1),
+.BR command (1),
+.BR which (1),
+.BR file (1),
+.BR readlink (1),
+.BR readelf (1)
 
 .SH AUTHOR
-John Blair
+John Blair  <jjohnnn@hotmail.com>
 
 .SH LICENSE
-https://github.com/JB63134/bash_ct/blob/main/LICENSE
+.B ct
+is distributed under the MIT License.
