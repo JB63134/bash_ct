@@ -1,6 +1,6 @@
 ## `ct` conflict mode flags `-c` `-j` `-x`
 
-** Normal command conflict report `-c`**
+**Normal command conflict report `-c`**
 
 ```bash
 22:47:17 Wed Aug 19: ~ $ ct -c
