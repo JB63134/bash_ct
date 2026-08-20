@@ -1,6 +1,11 @@
-```bash
 
-05:20:31 Thu Jan 22: ~ $ ct fstrim
+### Example: `$PATH` Auto-Extension and `-x` Manual Extension
+
+**On a typical system, fstrim will not be found in the user's `$PATH`.**
+
+``` bash
+
+21:54:17 Wed Aug 19: ~ $ ct fstrim
 Command Trace of fstrim
 
 Not in $USER $PATH
@@ -30,10 +35,25 @@ Bash Resolution Target:
 Kernel Execution Target:
   ↳ Executable → /usr/sbin/fstrim
   ↳ ELF interpreter: /lib64/ld-linux-x86-64.so.2
+```
 
+Since `fstrim` wasn't found in the user's `$PATH`, `ct` auto-extended the search to include administrative system directories.
 
-05:21:36 Thu Jan 22: ~ $ ct useradd
-Command Trace of useradd
+---
+
+Let's add a custom user script called `fstrim`.
+
+```bash
+21:54:36 Wed Aug 19: ~ $ mv ~/bin/dummyfile ~/bin/fstrim
+```
+
+Now `fstrim` will be found in the user's `$PATH`.
+
+---
+
+```bash
+21:54:47 Wed Aug 19: ~ $ ct fstrim
+Command Trace of fstrim
 
 Keyword:  -  not found
 Alias:    -  not found
@@ -41,8 +61,8 @@ Function: -  not found
 Builtin:  -  not found
 
 $PATH in order:
-  ↳ /home/jb/bin             - useradd found    # match found in user path
-  ↳ /home/jb/bin/scripts     - not found        # system path not auto-extended
+  ↳ /home/jb/bin             - fstrim found
+  ↳ /home/jb/bin/scripts     - not found
   ↳ /home/jb/.local/bin      - not found
   ↳ /usr/local/bin           - not found
   ↳ /usr/bin                 - not found
@@ -51,15 +71,24 @@ $PATH in order:
   ↳ /usr/games               - not found
 
 Bash Resolution Target:
-  ↳ Resolved to: Filesystem → /home/jb/bin/useradd
+  ↳ Resolved to: Filesystem → /home/jb/bin/fstrim
 
 Kernel Execution Target:
-  ↳ Executable → /home/jb/bin/useradd
-  ↳ Shebang: /bin/bash
+  ↳ Executable → /home/jb/bin/fstrim
+  ↳ Shebang: #!/bin/bash
+
+```
 
 
-05:22:01 Thu Jan 22: ~ $ ct -x useradd    # path manually extended
-Command Trace of useradd
+Since `fstrim` was found in the user's `$PATH` there was no need to extend the search.
+
+---
+
+By manually extending the search with `-x` you can see if any system commands are being shadowed.
+
+```bash
+21:55:18 Wed Aug 19: ~ $ ct -x fstrim
+Command Trace of fstrim
 
 Keyword:  -  not found
 Alias:    -  not found
@@ -67,7 +96,7 @@ Function: -  not found
 Builtin:  -  not found
 
 $PATH in order:
-  ↳ /home/jb/bin             - useradd found
+  ↳ /home/jb/bin             - fstrim found
   ↳ /home/jb/bin/scripts     - not found
   ↳ /home/jb/.local/bin      - not found
   ↳ /usr/local/bin           - not found
@@ -76,320 +105,19 @@ $PATH in order:
   ↳ /usr/local/games         - not found
   ↳ /usr/games               - not found
   ↳ /usr/local/sbin          - not found
-  ↳ /usr/sbin                - useradd [shadowed]    # system path binaries are now found
-  ↳ /sbin                    - useradd [shadowed]
+  ↳ /usr/sbin                - fstrim [shadowed]
+  ↳ /sbin                    - fstrim [shadowed]
 
 Bash Resolution Target:
-  ↳ Resolved to: Filesystem → /home/jb/bin/useradd
+  ↳ Resolved to: Filesystem → /home/jb/bin/fstrim
 
 Kernel Execution Target:
-  ↳ Executable → /home/jb/bin/useradd
-  ↳ Shebang: /bin/bash
+  ↳ Executable → /home/jb/bin/fstrim
+  ↳ Shebang: #!/bin/bash
 
 
-
-05:22:13 Thu Jan 22: ~ $ type useradd      # system path binaries are not listed
-useradd is /home/jb/bin/useradd
-
-05:23:24 Thu Jan 22: ~ $ type -a useradd
-useradd is /home/jb/bin/useradd               
-
-05:23:36 Thu Jan 22: ~ $ which useradd        
-/home/jb/bin/useradd                          
-
-05:29:51 Thu Jan 22: ~ $ which -a useradd
-/home/jb/bin/useradd
-
-
-05:55:58 Thu Jan 22: ~ $ ct fg
-Command Trace of fg
-
-Keyword:  -  not found
-Alias:    -  not found
-Function: -  not found
-Builtin:  -  fg → found → enabled
-
-$PATH in order:
-  ↳ /home/jb/bin             - fg [shadowed]
-  ↳ /home/jb/bin/scripts     - not found
-  ↳ /home/jb/.local/bin      - not found
-  ↳ /usr/local/bin           - not found
-  ↳ /usr/bin                 - not found
-  ↳ /bin                     - not found
-  ↳ /usr/local/games         - not found
-  ↳ /usr/games               - not found
-
-Bash Resolution Target:
-  ↳ Resolved to: Builtin → fg → enabled
-  ↳ Note: Filesystem executables named 'fg' are unreachable by bare invocation.
-
-Kernel Execution Target:
-  ↳ NONE                  
-
-05:56:06 Thu Jan 22: ~ $ enable -n fg    # disable the builtin
-
-05:56:30 Thu Jan 22: ~ $ ct fg
-Command Trace of fg
-
-Keyword:  -  not found
-Alias:    -  not found
-Function: -  not found
-Builtin:  -  fg → found → disabled
-
-$PATH in order:
-  ↳ /home/jb/bin             - fg found
-  ↳ /home/jb/bin/scripts     - not found
-  ↳ /home/jb/.local/bin      - not found
-  ↳ /usr/local/bin           - not found
-  ↳ /usr/bin                 - not found
-  ↳ /bin                     - not found
-  ↳ /usr/local/games         - not found
-  ↳ /usr/games               - not found
-
-Bash Resolution Target:
-  ↳ Resolved to: Filesystem → /home/jb/bin/fg
-
-Kernel Execution Target:
-  ↳ Executable → /home/jb/bin/fg
-  ↳ Shebang: /usr/bin/env bash
-
-
-05:56:33 Thu Jan 22: ~ $ 
-#-------------------------------------------------------------------------------------------------------
-Posix mode:
-22:58:16 Sat Jan 24: ~ $ foo/bar
-Sat Jan 24 10:58:19 PM CST 2026
-
-22:58:19 Sat Jan 24: ~ $ eval
-jb       seat0        2026-01-23 08:21
-jb       tty2         2026-01-23 08:21
-
-22:58:21 Sat Jan 24: ~ $ ct foo/bar
-Command Trace of foo/bar
-
-Keyword:  -  not found
-Alias:    -  not found
-Function: -  foo/bar → found → Function foo/bar (/home/jb/.bash_functions : line 95)
-Builtin:  -  not found
-
-$PATH in order:
-  ↳ /home/jb/bin             - not found
-  ↳ /home/jb/bin/scripts     - not found
-  ↳ /home/jb/.local/bin      - not found
-  ↳ /usr/local/bin           - not found
-  ↳ /usr/bin                 - not found
-  ↳ /bin                     - not found
-  ↳ /usr/local/games         - not found
-  ↳ /usr/games               - not found
-
-Bash Resolution Target:
-  ↳ Resolved to: Function → foo/bar → /home/jb/.bash_functions : line 95
-
-Kernel Execution Target:
-  ↳ NONE
-
-
-22:58:23 Sat Jan 24: ~ $ ct eval 
-Command Trace of eval
-
-Keyword:  -  not found
-Alias:    -  not found
-Function: -  eval → found → Function eval (/home/jb/.bash_functions : line 99)
-Builtin:  -  eval → found → enabled [shadowed]
-
-$PATH in order:
-  ↳ /home/jb/bin             - not found
-  ↳ /home/jb/bin/scripts     - not found
-  ↳ /home/jb/.local/bin      - not found
-  ↳ /usr/local/bin           - not found
-  ↳ /usr/bin                 - not found
-  ↳ /bin                     - not found
-  ↳ /usr/local/games         - not found
-  ↳ /usr/games               - not found
-
-Bash Resolution Target:
-  ↳ Resolved to: Function → eval → /home/jb/.bash_functions : line 99
-  ↳ Note: Builtin 'eval' is unreachable by bare invocation.
-
-Kernel Execution Target:
-  ↳ NONE
-
-
-22:58:26 Sat Jan 24: ~ $ set -o posix
-
-22:58:29 Sat Jan 24: ~ $ ct foo/bar
-Unknown or invalid command: foo/bar
-  ↳ Check your spelling and try again
-
-
-22:58:33 Sat Jan 24: ~ $ ct eval 
-Command Trace of eval
-
-Bash is in POSIX mode:
-POSIX special builtins cannot be shadowed by functions;
-conflicting function names are disallowed.
-
-Keyword:  -  not found
-Alias:    -  not found
-Function: -  not found
-Builtin:  -  eval → found → enabled
-
-$PATH in order:
-  ↳ /home/jb/bin             - not found
-  ↳ /home/jb/bin/scripts     - not found
-  ↳ /home/jb/.local/bin      - not found
-  ↳ /usr/local/bin           - not found
-  ↳ /usr/bin                 - not found
-  ↳ /bin                     - not found
-  ↳ /usr/local/games         - not found
-  ↳ /usr/games               - not found
-
-Bash Resolution Target:
-  ↳ Resolved to: Builtin → eval → enabled
-
-Kernel Execution Target:
-  ↳ NONE
-
-
-22:58:37 Sat Jan 24: ~ $ 
-
-22:59:40 Sat Jan 24: ~ $ ct cd
-Command Trace of cd
-
-Bash is in POSIX mode:
-POSIX special builtins cannot be shadowed by functions;
-conflicting function names are disallowed.
-
-Keyword:  -  not found
-Alias:    -  not found
-Function: -  cd → found → Function cd (/home/jb/.bash_functions : line 26)
-Builtin:  -  cd → found → enabled [shadowed]
-
-$PATH in order:
-  ↳ /home/jb/bin             - cd [shadowed]
-  ↳ /home/jb/bin/scripts     - not found
-  ↳ /home/jb/.local/bin      - not found
-  ↳ /usr/local/bin           - not found
-  ↳ /usr/bin                 - not found
-  ↳ /bin                     - not found
-  ↳ /usr/local/games         - not found
-  ↳ /usr/games               - not found
-
-Bash Resolution Target:
-  ↳ Resolved to: Function → cd → /home/jb/.bash_functions : line 26
-  ↳ Note: Builtin 'cd' is unreachable by bare invocation.
-  ↳ Note: Filesystem executables named 'cd' are unreachable by bare invocation.
-
-Kernel Execution Target:
-  ↳ NONE
-
-
-22:59:43 Sat Jan 24: ~ $ 
-
-
+21:55:21 Wed Aug 19: ~ $ 
 ```
-```
-18:44:13 Tue Jan 27: ~ $ set -o posix
 
-18:44:16 Tue Jan 27: ~ $ alias times='uptime'
-
-18:44:28 Tue Jan 27: ~ $ times
- 18:44:30 up 4 days, 10:23,  1 user,  load average: 0.22, 0.24, 0.25
-
-18:44:30 Tue Jan 27: ~ $ ct times
-Command Trace of times
-
-Bash is in POSIX mode:
-POSIX special builtins cannot be shadowed by functions;
-conflicting function names are disallowed.
-
-Keyword:  -  not found
-Alias:    -  times → found → times='uptime'
-Function: -  not found
-Builtin:  -  times → found → enabled [shadowed]
-
-$PATH in order:
-  ↳ /home/jb/bin             - times [shadowed]
-  ↳ /home/jb/bin/scripts     - not found
-  ↳ /home/jb/.local/bin      - not found
-  ↳ /usr/local/bin           - not found
-  ↳ /usr/bin                 - not found
-  ↳ /bin                     - not found
-  ↳ /usr/local/games         - not found
-  ↳ /usr/games               - not found
-
-Bash Resolution Target:
-  ↳ Resolved to: Alias → times → times='uptime'
-  ↳ Note: Builtin 'times' is unreachable by bare invocation.
-  ↳ Note: Filesystem executables named 'times' are unreachable by bare invocation.
-
-Kernel Execution Target:
-  ↳ NONE
-
-
-18:44:35 Tue Jan 27: ~ $ enable -n times 
-
-18:45:19 Tue Jan 27: ~ $ ct times
-Command Trace of times
-
-Bash is in POSIX mode:
-POSIX special builtins cannot be shadowed by functions;
-conflicting function names are disallowed.
-
-Keyword:  -  not found
-Alias:    -  times → found → times='uptime'
-Function: -  not found
-Builtin:  -  times → found → disabled
-
-$PATH in order:
-  ↳ /home/jb/bin             - times [shadowed]
-  ↳ /home/jb/bin/scripts     - not found
-  ↳ /home/jb/.local/bin      - not found
-  ↳ /usr/local/bin           - not found
-  ↳ /usr/bin                 - not found
-  ↳ /bin                     - not found
-  ↳ /usr/local/games         - not found
-  ↳ /usr/games               - not found
-
-Bash Resolution Target:
-  ↳ Resolved to: Alias → times → times='uptime'
-  ↳ Note: Filesystem executables named 'times' are unreachable by bare invocation.
-
-Kernel Execution Target:
-  ↳ NONE
-
-
-18:45:23 Tue Jan 27: ~ $ unalias times
-
-18:45:37 Tue Jan 27: ~ $ ct times
-Command Trace of times
-
-Bash is in POSIX mode:
-POSIX special builtins cannot be shadowed by functions;
-conflicting function names are disallowed.
-
-Keyword:  -  not found
-Alias:    -  not found
-Function: -  not found
-Builtin:  -  times → found → disabled
-
-$PATH in order:
-  ↳ /home/jb/bin             - times found
-  ↳ /home/jb/bin/scripts     - not found
-  ↳ /home/jb/.local/bin      - not found
-  ↳ /usr/local/bin           - not found
-  ↳ /usr/bin                 - not found
-  ↳ /bin                     - not found
-  ↳ /usr/local/games         - not found
-  ↳ /usr/games               - not found
-
-Bash Resolution Target:
-  ↳ Resolved to: Filesystem → /home/jb/bin/times
-
-Kernel Execution Target:
-  ↳ Executable → /home/jb/bin/times
-  ↳ Shebang: /usr/bin/env bash
-
-
-18:45:40 Tue Jan 27: ~ $ 
-```
+**No user `$PATH` hit:** `ct` auto-extends the search to system directories.  
+**With `-x`:** `ct` extends the search even when a user `$PATH` hit exists.
