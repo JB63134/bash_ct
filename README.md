@@ -1,7 +1,7 @@
 # bash_ct
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-4.4.0-blue)](https://github.com/JB63134/bash_ct/releases)
+[![Version](https://img.shields.io/badge/version-4.4.50-blue)](https://github.com/JB63134/bash_ct/releases)
 
 **Bash Command Resolution Trace**
 
