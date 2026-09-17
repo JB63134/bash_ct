@@ -1,4 +1,27 @@
 # `bash_ct` Changelog
+
+## V4.4.50
+
+### Improved
+
+* Added detection and reporting of empty `$PATH` components.
+
+  * Empty components are represented explicitly in the PATH trace.
+  * The human-readable report identifies them as `'' (current directory)`.
+  * A PATH note explains that Bash treats an empty component as the current directory.
+* Improved `$PATH` candidate validation by requiring entries to be both regular files and executable.
+* Improved command resolution and shadowing detection across aliases, functions, keywords, builtins, and `$PATH`.
+* Expanded filesystem and kernel-level tracing, including symlinks, `/etc/alternatives`, ELF interpreters, shebangs, and usr-merged paths.
+* Improved JSON output and escaping, including explicit handling of empty strings versus `null`.
+* Improved POSIX-mode handling and special-builtin precedence.
+* Fixed numerous edge cases in PATH resolution, conflict reporting, JSON output, and shell-state restoration.
+
+## V4.4.05
+
+### documentation
+
+* Fixed usage dialog to make -x clear
+
 ## V4.4.0
 
 ### Improved
