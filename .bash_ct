@@ -11,8 +11,8 @@
 #
 # • This script is intended to be SOURCED into an interactive Bash shell.
 # • This script does NOT use `set -euo pipefail`.
-# • PATH is may be extended during execution to improve discovery of
-#   administrative and user-level command locations. PATH is restored on exit.
+# • PATH may be extended during execution to improve discovery of administrative directories. 
+#   PATH is restored on exit.
 #
 # • Shell option `extglob` may be enabled temporarily and is restored afterward.
 #
@@ -29,7 +29,7 @@
 #
 # When ct is invoked without -x/--extend and a command is not
 # found in the user's PATH, ct will temporarily include known
-# administrative paths (e.g. /usr/sbin, /sbin) to locate it.
+# administrative paths (e.g. /usr/sbin, /sbin) to locate the command.
 #
 # This behavior:
 #   • does NOT modify PATH permanently
@@ -40,18 +40,31 @@
 #
 #   "auto_extended": true
 #
-# Explicit -x/--extend disables auto-extension semantics and
-# guarantees exhaustive analysis regardless of resolution.
+# MANUAL EXTENSION (-x/--extend)
+#
+# • Adding -x/--extend disables automatic-extension semantics and forces ct
+#   to temporarily extend its executable search path, even when the command
+#   has already been found earlier in the resolution chain.
+#
+#   Without -x:
+#     • If resolution fails → ct temporarily extends $PATH to include system
+#       directories and tries again.
+#
+#   With -x:
+#     • Even if resolution succeeds → ct still extends the search path.
+#     • This allows shadowed commands in administrative directories to be
+#       detected.
 #-----------------------------------------------------------------------------------------------
 if [[ -z "${BASH_VERSION:-}" ]]; then
     printf "ct must be sourced or executed by bash.\n" >&2
     return 1
 fi
 
-__CT_version=4.4.0
+__CT_version=4.4.50
 __CT_needed_deps=(readlink readelf mktemp stat)
 __CT_optional_deps=(tput)
 __CT_extglob_was=0
+__CT_PATH_SAVED=0
 __CT_POSIX_SPECIAL_BUILTINS=(
     :
     .
@@ -78,6 +91,20 @@ complete -F _ct_completion ct
 #------------------------------------------------------------------------
 # Function: ct
 # Purpose : User-facing entry point.
+#------------------------------------------------------------------------
+ct() {
+    local rc
+
+    _ct_main "$@"
+    rc=$?
+
+    _ct_exit
+
+    return "$rc"
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_main
 #
 # Behavior:
 # • Parses command-line options
@@ -88,13 +115,11 @@ complete -F _ct_completion ct
 # • 0  → successful resolution
 # • 1  → command not found or invalid input
 #------------------------------------------------------------------------
-ct() {
+_ct_main() {
     local __CT_JSON_OUTPUT=0
     local __CT_EXTEND_PATH=0
     local __CT_AUTO_EXTEND=0
     local __CT_CONFLICT=0
-    
-    trap '_ct_exit' RETURN
 
     while [[ $# -gt 0 ]]; do
         local arg="$1"
@@ -120,16 +145,6 @@ ct() {
                 __CT_EXTEND_PATH=1
                 shift
                 ;;
-            --json--extend|--extend--json)  
-                __CT_JSON_OUTPUT=1
-                __CT_EXTEND_PATH=1
-                shift
-                ;;
-            --json--conflict|--conflict--json)  
-                __CT_JSON_OUTPUT=1
-                __CT_CONFLICT=1
-                shift
-                ;; 
             -*)  # short flags, possibly combined like -jx
                 local i
                 for (( i=1; i<${#arg}; i++ )); do
@@ -179,39 +194,40 @@ ct() {
     fi
 
     # ---- Startup ----  
-    _ct_startup "$__CT_EXTEND_PATH"
+    _ct_startup "$__CT_EXTEND_PATH" || return 1
     
     # JSON mode rejects path input
-    if [[ $__CT_JSON_OUTPUT == 1 ]] && [[ "$1" == */* ]]; then
-        local path_type
+    if [[ $__CT_JSON_OUTPUT == 1 && "$1" == */* ]]; then
+        local message_json
+
         if [[ -d "$1" ]]; then
-            path_type="directory"
+            message_json=$(_ct_json_string_or_null \
+            "$1 is a directory. Command Trace only works with bare command names.")
         elif [[ -f "$1" ]]; then
-            path_type="file"
-        else 
-            path_type="" 
-        fi
-        
-        if [[ -n $path_type ]]; then
-            printf '{ "error": true, "type": "invalid_input", "message": "%s is a %s. Command Trace only works with bare command names." }\n' "$1" "$path_type"
+            message_json=$(_ct_json_string_or_null \
+            "$1 is a file. Command Trace only works with bare command names.")
         else
-            printf '{ "error": true, "type": "invalid_input", "message": "Unknown or invalid command: %s" }\n' "$1"
-            return 1
+            message_json=$(_ct_json_string_or_null \
+            "$1 is a pathname. Command Trace only works with bare command names.")
         fi
-        return 1 
+
+        printf '{ "error": true, "type": "invalid_input", "message": %s }\n' \
+            "$message_json"
+        return 1
     fi
     
     # Human-readable mode rejects path input with explanation
     if [[ "$1" == */* ]]; then
         if [[ -d "$1" ]]; then
             printf "├─ ${__CT_RED}%s is a directory${__CT_RESET}\n" "$1"
-            printf "    ↳ Please provide the command name only, not a path.\n\n"
-            return 1
         elif [[ -f "$1" ]]; then
             printf "├─ ${__CT_RED}%s is a file${__CT_RESET}\n" "$1"
-            printf "    ↳ Command Trace only works with bare command names.\n\n"
-            return 1
-        fi 
+        else
+            printf "├─ ${__CT_RED}%s is a pathname${__CT_RESET}\n" "$1"
+        fi
+
+        printf "    ↳ Command Trace only works with bare command names.\n\n"
+        return 1
     fi
     
     # Dispatch output
@@ -266,17 +282,8 @@ _ct_resolve() {
     R[keyword_shadowed_alias]=false
     R[alias_shadowed]=false
     R[posix_mode]=false
+    R[empty_path_component]=false
     
-    # ------------------------------------------------------------
-    # Edge cases
-    # ------------------------------------------------------------
-    case "$cmd" in
-        '{'|'}'|'('|')'|'[['|']]'|']'|'.')
-            R[keyword_found]=true
-            R[bash_type]="keyword"
-            ;;
-    esac
-
     # ------------------------------------------------------------
     # Alias
     # ------------------------------------------------------------
@@ -399,11 +406,24 @@ _ct_resolve() {
     local path_winner_seen=0
 
     IFS=: read -ra _dirs <<<"$PATH"
+    # Preserve a trailing empty PATH component.
+    if [[ -z "$PATH" ]]; then
+        _dirs=("")
+    elif [[ "$PATH" == *: ]]; then
+        _dirs+=("")
+    fi
+    
     for d in "${_dirs[@]}"; do
-        local p="$d/$cmd"
+        # An empty PATH component means bash uses the current directory.
+        if [[ -z $d ]]; then
+            R[empty_path_component]=true
+        fi
+    
+        local lookup_dir="${d:-.}"
+        local p="$lookup_dir/$cmd"
         
         # Skip if not executable
-        if [[ ! -x "$p" ]]; then
+        if [[ ! -f "$p" || ! -x "$p" ]]; then
             P+=("$d|notfound||false")
             continue
         fi
@@ -464,12 +484,18 @@ _ct_resolve() {
         # Symlink chain (safe string for JSON)
         local chain=()
         local x="$found_path"
+
         while [[ -L "$x" ]]; do
-            local y
             y="$(readlink "$x")"
             chain+=("$x -> $y")
-            x="$y"
+
+            if [[ $y == /* ]]; then
+                x="$y"
+            else
+                x="${x%/*}/$y"
+            fi
         done
+        
         R[kernel_chain]=$(printf '%s\n' "${chain[@]}")  # newline-delimited string
 
         # Alternatives detection
@@ -487,13 +513,6 @@ _ct_resolve() {
             fi
             x="$(readlink -f "$x")"
         done
-    fi
-  
-    # special edge case
-    if [[ $cmd == "." ]]; then
-        R[bash_type]="keyword"
-        R[keyword_found]=true
-        R[builtin_shadowed]=false
     fi
     
     : "${R[bash_type]:=notfound}"
@@ -582,13 +601,13 @@ _ct_print_trace() {
 
     if (( __CT_AUTO_EXTEND )); then 
         printf "\n"
-        printf "Not in \$USER \$PATH\nFound in system \$PATH %s(auto-extended)%s:\n" "${__CT_YELLOW}" "${__CT_RESET}"
+        printf "Not in \$USER \$PATH\n  ↳ Found in system \$PATH %s(auto-extended)%s:\n" "${__CT_YELLOW}" "${__CT_RESET}"
     fi
         # Dispatch output
     if (( __CT_POSIX_MODE )); then
         printf "\n"
-        printf "Bash is in POSIX mode:\nPOSIX special builtins cannot be shadowed by functions;\nconflicting function names are disallowed.\n"
-  #      printf "The shell will not execute a function whose name contains one or more slashes.\n" 
+        printf "Bash is in POSIX mode:\n  ↳ POSIX special builtins take precedence over functions
+with the same name.\n"
     fi
     printf "\n"
 
@@ -657,37 +676,50 @@ _ct_print_trace() {
 
     for entry in "${PATH_ENTRIES[@]}"; do
         IFS='|' read -r dir state target shadow <<<"$entry"
-
+       
         local usr_merged=""
+        local lookup_dir="${dir:-.}"
+        local display_dir="$dir"
+        
+        if [[ -z $dir ]]; then
+            display_dir="'' (current directory)"
+        fi
+
         # Detect usr-merged directories by comparing inode to kernel_path
-        if [[ -n "${RES[kernel_path]}" && -e "$dir/$cmd" ]]; then
+        if [[ -n "${RES[kernel_path]}" && -e "$lookup_dir/$cmd" ]]; then
             local inode1 inode2
-            inode1=$(stat -c %i "$dir/$cmd" 2>/dev/null || echo "")
+            inode1=$(stat -c %i "$lookup_dir/$cmd" 2>/dev/null || echo "")
             inode2=$(stat -c %i "${RES[kernel_path]}" 2>/dev/null || echo "")
-            [[ "$inode1" == "$inode2" && "$dir/$cmd" != "${RES[kernel_path]}" ]] && usr_merged=" [usr-merged]"
+            [[ "$inode1" == "$inode2" && "$lookup_dir/$cmd" != "${RES[kernel_path]}" ]] && usr_merged=" [usr-merged]"
         fi
 
         case "$state" in
             notfound)
-                printf "  ↳ %-24s - not found\n" "$dir"
+                printf "  ↳ %-24s - not found\n" "$display_dir"
                 ;;
             file)
                 if [[ $shadow == true ]]; then
-                    printf "  ↳ %-24s - ${__CT_GREY}%s [shadowed]%s${__CT_RESET}\n" "$dir" "$cmd" "$usr_merged"
+                    printf "  ↳ %-24s - ${__CT_GREY}%s [shadowed]%s${__CT_RESET}\n" "$display_dir" "$cmd" "$usr_merged"
                 else
-                    printf "  ↳ %-24s - ${__CT_CYAN}%s found${__CT_RESET}%s\n" "$dir" "$cmd" "$usr_merged"
+                    printf "  ↳ %-24s - ${__CT_CYAN}%s found${__CT_RESET}%s\n" "$display_dir" "$cmd" "$usr_merged"
                 fi
                 ;;
             symlink)
                 if [[ $shadow == true ]]; then
-                    printf "  ↳ %-24s - ${__CT_GREY}%s (symlink) [shadowed]%s${__CT_RESET}\n" "$dir" "$cmd" "$usr_merged"
+                    printf "  ↳ %-24s - ${__CT_GREY}%s (symlink) [shadowed]%s${__CT_RESET}\n" "$display_dir" "$cmd" "$usr_merged"
                 else
                     printf "  ↳ %-24s - ${__CT_CYAN}%s${__CT_RESET} → ${__CT_YELLOW}%s${__CT_RESET}%s\n" \
-                    "$dir" "$cmd" "$target" "$usr_merged"
+                    "$display_dir" "$cmd" "$target" "$usr_merged"
                 fi
                 ;;
         esac    
     done
+    
+    if [[ ${RES[empty_path_component]} == true ]]; then
+        printf "\n"
+        printf "PATH Note: An empty PATH component exists in \$PATH.\n"
+        printf "  ↳ Bash treats an empty PATH component as the current directory (.).\n"
+    fi
 
     printf "\n"
 
@@ -720,9 +752,11 @@ _ct_print_trace() {
 
         fi    
 
-        if [[ ${RES[alias_found]} == true || ${RES[function_found]} == true || ${RES[path_found]} == true ]]; then
+        if [[ ${RES[alias_found]} == true || 
+            ${RES[function_found]} == true ||
+            ${RES[shadowed_fs]} == true ]]; then
             printf "  ↳ Note: Keyword ${__CT_CYAN}'%s'${__CT_RESET} always wins in its reserved context; other commands are ignored.\n" \
-        "${RES[command]}"
+            "${RES[command]}"
         fi
     fi
     
@@ -796,18 +830,19 @@ _ct_print_trace() {
 #------------------------------------------------------------------------
 _ct_startup() {
     local __CT_EXTEND_PATH="$1"
-    # Save PATH if not already saved 
-    if [[ -z "$__CT_OLD_PATH" ]]; then
+    # Save PATH if not already saved.
+    if (( ! __CT_PATH_SAVED )); then
         __CT_OLD_PATH="$PATH"
+        __CT_PATH_SAVED=1
     fi
-    
+    _ct_setup_colors
     _ct_bash_posix_mode
     
-    _ct_bash_ver_check
-    _ct_check_dependencies __CT_needed_deps __CT_optional_deps 1  || return 1 # 1 = exit if required
+    _ct_bash_ver_check || return 1  # 1 = exit if required
+    _ct_check_dependencies __CT_needed_deps __CT_optional_deps 1  || return 1 
+    
     (( __CT_EXTEND_PATH )) && _ct_add_admin_paths
     _ct_enable_extglob
-    _ct_setup_colors # Setup tput or ansi
 }
 
 #------------------------------------------------------------------------
@@ -828,14 +863,13 @@ _ct_bash_posix_mode() {
 # Registered via trap to guarantee restoration of shell state.
 #------------------------------------------------------------------------
 _ct_exit() {
+
     _ct_restore_path
-    __CT_RESET_extglob
-    __CT_edgecase=0
+    _ct_reset_extglob
     __CT_EXTEND_PATH=0
     __CT_AUTO_EXTEND=0
     __CT_POSIX_MODE=0
 }
-
 #------------------------------------------------------------------------
 # Function: _ct_usage
 # Purpose : Display usage information and examples for the `h` command analyzer.
@@ -844,10 +878,10 @@ _ct_usage() {
     cat <<'EOF'
 
     Usage:
-      ct [option] command
+      ct [options] command
 
-    Command Trace (ct) analyzes how Bash resolves a command name 
-    and what the kernel ultimately executes.
+    Command Trace (ct) analyzes how Bash resolves a command name
+    and traces the filesystem and execution layers that follow.
 
     The command must be provided as a bare command name.
     Paths such as /bin/ls or ./script are rejected.
@@ -857,6 +891,7 @@ _ct_usage() {
       -v, --version     Show version and license information
       -j, --json        Emit JSON output suitable for scripting
       -c, --conflict    Show all conflicting commands in the namespace
+      -x, --extend      Force $PATH extension to find shadowed admin files
      
 EOF
 }
@@ -897,7 +932,7 @@ EOF
 
 #------------------------------------------------------------------------
 # Function: _ct_setup_colors         Colors (tput → ANSI → none)
-# Purpose : make stuff pretty also safe for diff setups
+# Purpose : make stuff pretty also safe for different setups
 #------------------------------------------------------------------------
 _ct_setup_colors() {
     if command -v tput &>/dev/null && [[ $(tput colors 2>/dev/null) -ge 8 ]]; then
@@ -941,9 +976,11 @@ _ct_setup_colors() {
 # Adds common user, admin, package-manager, and container paths.
 #------------------------------------------------------------------------
 _ct_add_admin_paths() {
-    # Save PATH if not already saved 
-    if [[ -z "$__CT_OLD_PATH" ]]; then
+ 
+    # Save PATH if not already saved.
+    if (( ! __CT_PATH_SAVED )); then
         __CT_OLD_PATH="$PATH"
+        __CT_PATH_SAVED=1
     fi
 
     local admin_dirs=(
@@ -965,10 +1002,11 @@ _ct_add_admin_paths() {
 # Purpose : Automatically restore PATH when needed
 #------------------------------------------------------------------------
 _ct_restore_path() {
-    if [[ -n "$__CT_OLD_PATH" ]]; then
-        PATH="$__CT_OLD_PATH"
-        unset __CT_OLD_PATH
-    fi
+    if (( __CT_PATH_SAVED )); then
+         PATH="$__CT_OLD_PATH"
+         unset __CT_OLD_PATH
+        __CT_PATH_SAVED=0
+     fi
 }
 
 #------------------------------------------------------------------------
@@ -985,38 +1023,51 @@ _ct_completion() {
     local commands
     
     local _old_path="$PATH"
+    local _old_path_saved="$__CT_PATH_SAVED"
+    local _old_saved_path="${__CT_OLD_PATH-}"
+    
     _ct_add_admin_paths
     
     # Collect possible completions: aliases, functions, builtins, and executables in PATH
     mapfile -t commands < <(compgen -A function -A alias -A builtin -A command -- "$cur")
     # Provide them to bash-completion
     COMPREPLY=("${commands[@]}")
+    
     PATH="$_old_path"
+    __CT_PATH_SAVED="$_old_path_saved"
+    if (( _old_path_saved )); then
+        __CT_OLD_PATH="$_old_saved_path"
+    else
+        unset __CT_OLD_PATH
+    fi
 }
 
 #------------------------------------------------------------------------
-# Function: _ct_enable_extglob / __CT_RESET_extglob
+# Function: _ct_enable_extglob  
 # Purpose : Safely manage extglob state
 #
 # extglob is needed for advanced pattern matching but must not
 # permanently alter the user's shell environment.
 #------------------------------------------------------------------------
 _ct_enable_extglob() {
+    __CT_extglob_was=0
+
     if shopt -q extglob; then
         __CT_extglob_was=1
     else
         shopt -s extglob
     fi
 }
-
 #------------------------------------------------------------------------
-# Function: __CT_RESET_extglob
+# Function: _ct_reset_extglob
 # Purpose : Restore extglob to prior state, safley turn off if needed.
 #------------------------------------------------------------------------
-__CT_RESET_extglob() {
-    (( !__CT_extglob_was )) && shopt -u extglob     # Restore extglob state if we enabled it
+_ct_reset_extglob() {
+    if (( ! __CT_extglob_was )); then
+        shopt -u extglob
+    fi
+    __CT_extglob_was=0
 }
-
 #------------------------------------------------------------------------
 # Function: _ct_check_dependencies
 # Purpose : Check core and optional dependencies, optionally exit on missing core deps
@@ -1051,7 +1102,13 @@ _ct_check_dependencies() {
 #------------------------------------------------------------------------
 # Function: _ct_bash_ver_check
 # Purpose : Enforce minimum Bash version
-# Bash 4.4+ is required for associative arrays and namerefs.
+#
+# Bash 4.4+ is required.
+#
+# ct relies heavily on associative arrays and namerefs for _ct_resolve.
+# Associative arrays were introduced in Bash 4.0, and namerefs were
+# introduced in Bash 4.3. Bash 4.4 substantially revised and stabilized
+# nameref behavior and added further improvements to array handling.
 #------------------------------------------------------------------------
 _ct_bash_ver_check() {
     local MIN_BASH_MAJOR=4
@@ -1070,7 +1127,7 @@ _ct_bash_ver_check() {
 
 #------------------------------------------------------------------------
 # Function: _ct_json_output
-# Purpose : json output the name kind of says it all... 
+# Purpose : json output the name kind of says it all...
 #------------------------------------------------------------------------
 # JSON OUTPUT NOTES:
 #
@@ -1091,50 +1148,53 @@ _ct_json_output() {
 
     _ct_resolve "$cmd" RES PATH_ENTRIES || return 1
 
-    if [[ ${RES[bash_type]} == "notfound" ]]; then
-        printf '{ "error": true, "type": "invalid_input", "message": "Unknown or invalid command: %s" }\n' "$cmd"
-        return 1
-    fi
-
     # Precompute JSON values
-    local bash_type_json="${RES[bash_type]:-null}"
-    [[ -n "$bash_type_json" && "$bash_type_json" != "null" ]] && bash_type_json="\"$bash_type_json\""
-    
+    local bash_type_json
+    bash_type_json=$(_ct_json_string_or_null "${RES[bash_type]}")
+
     if (( __CT_POSIX_MODE )); then
         local posix_mode=true
-    else 
+    else
         local posix_mode=false
     fi
-    
-    # auto_extended is true only if automatic PATH extension occurred
-    if (( __CT_AUTO_EXTEND )) && [[ -z "${CT_MANUAL_PATH_EXTEND}" ]]; then
-        local auto_extended_json=true
-    else
-        local auto_extended_json=false
-    fi
 
-    local alias_def_json="${RES[alias_def]:-null}"
-    [[ -n "$alias_def_json" && "$alias_def_json" != "null" ]] && alias_def_json="\"$alias_def_json\""
-    local function_file_json="${RES[function_file]:-null}"
-    [[ -n "$function_file_json" && "$function_file_json" != "null" ]] && function_file_json="\"$function_file_json\""
-    local function_line_json="${RES[function_line]:-null}"
-    [[ -n "$function_line_json" && "$function_line_json" != "null" ]] && function_line_json="\"$function_line_json\""
-    local builtin_state_json="${RES[builtin_state]:-null}"
-    [[ -n "$builtin_state_json" && "$builtin_state_json" != "null" ]] && builtin_state_json="\"$builtin_state_json\""
-    local kernel_path_json="${RES[kernel_path]:-null}"
-    [[ -n "$kernel_path_json" && "$kernel_path_json" != "null" ]] && kernel_path_json="\"$kernel_path_json\""
-    local kernel_canonical_json="${RES[kernel_canonical]:-null}"
-    [[ -n "$kernel_canonical_json" && "$kernel_canonical_json" != "null" ]] && kernel_canonical_json="\"$kernel_canonical_json\""
-    local elf_interp_json="${RES[elf_interp]:-null}"
-    [[ -n "$elf_interp_json" && "$elf_interp_json" != "null" ]] && elf_interp_json="\"$elf_interp_json\""
-    local shebang_json="${RES[shebang]:-null}"
-    [[ -n "$shebang_json" && "$shebang_json" != "null" ]] && shebang_json="\"$shebang_json\""
+    # auto_extended is true only when ct automatically
+    # extended PATH after the command was not found.
+    local auto_extended_json=false
+    (( __CT_AUTO_EXTEND )) && auto_extended_json=true
+
+    local alias_def_json
+    local function_file_json
+    local function_line_json
+    local builtin_state_json
+    local kernel_path_json
+    local kernel_canonical_json
+    local elf_interp_json
+    local shebang_json
+
+    alias_def_json=$(_ct_json_string_or_null "${RES[alias_def]}")
+    function_file_json=$(_ct_json_string_or_null "${RES[function_file]}")
+    function_line_json=$(_ct_json_string_or_null "${RES[function_line]}")
+    builtin_state_json=$(_ct_json_string_or_null "${RES[builtin_state]}")
+    kernel_path_json=$(_ct_json_string_or_null "${RES[kernel_path]}")
+    kernel_canonical_json=$(_ct_json_string_or_null "${RES[kernel_canonical]}")
+    elf_interp_json=$(_ct_json_string_or_null "${RES[elf_interp]}")
+    shebang_json=$(_ct_json_string_or_null "${RES[shebang]}")
 
     # PATH JSON, one object per line
-    path_json="["
+    local path_json="["
+    local dir state target shadow
+    local dir_json state_json target_json
+    local shadow_json
+    local usr_merged
+
     for entry in "${PATH_ENTRIES[@]}"; do
         IFS='|' read -r dir state target shadow <<<"$entry"
-        [[ -z "$target" ]] && target_json=null || target_json="\"$target\""
+        
+        dir_json=$(_ct_json_string "$dir")
+        state_json=$(_ct_json_string_or_null "$state")
+        target_json=$(_ct_json_string_or_null "$target")
+
         [[ $shadow == true ]] && shadow_json=true || shadow_json=false
 
         usr_merged=false
@@ -1156,8 +1216,8 @@ _ct_json_output() {
         esac
 
         path_json+=$'\n    {'
-        path_json+="\"dir\": \"$dir\","
-        path_json+="\"state\": \"$state\","
+        path_json+="\"dir\": $dir_json,"
+        path_json+="\"state\": $state_json,"
         path_json+="\"target\": $target_json,"
         path_json+="\"shadowed\": $shadow_json,"
         path_json+="\"usr_merged\": $usr_merged"
@@ -1168,24 +1228,32 @@ _ct_json_output() {
     path_json="${path_json%,}"$'\n]'
 
     # Convert kernel_chain string to JSON array
-    chain_json=""
+    local chain_json=""
     if [[ -n "${RES[kernel_chain]}" ]]; then
         local first=1
+        local line
+
         while IFS= read -r line; do
             (( first )) || chain_json+=", "
             chain_json+="$(_ct_json_string_or_null "$line")"
             first=0
         done <<<"${RES[kernel_chain]}"
     fi
-    
+
     local datetime
     datetime=$(printf '%(%Y-%m-%dT%H:%M:%S%z)T\n' -1)
-    
-        # Output JSON uuoc
-        cat <<EOF
+
+    local report_time_json
+    local command_json
+
+    report_time_json=$(_ct_json_string_or_null "$datetime")
+    command_json=$(_ct_json_string_or_null "${RES[command]}")
+
+    # Output JSON
+    cat <<EOF
 {
-  "report_time": "$datetime",
-  "command": "${RES[command]}",
+  "report_time": $report_time_json,
+  "command": $command_json,
   "posix_mode": $posix_mode,
   "auto_extended": $auto_extended_json,
   "bash_type": $bash_type_json,
@@ -1221,18 +1289,64 @@ EOF
 }
 
 #------------------------------------------------------------------------
+# Function: _ct_json_string
+# Purpose : Emit a JSON string, including an empty string.
+#------------------------------------------------------------------------
+_ct_json_string() {
+    local s=$1
+    local out='"'
+    local i char
+
+    for (( i=0; i<${#s}; i++ )); do
+        char=${s:i:1}
+
+        case "$char" in
+            $'\b') out+='\\b' ;;
+            $'\f') out+='\\f' ;;
+            $'\n') out+='\\n' ;;
+            $'\r') out+='\\r' ;;
+            $'\t') out+='\\t' ;;
+            $'\\')  out+=$'\\\\' ;;
+            '"')    out+='\"' ;;
+            *)      out+="$char" ;;
+        esac
+    done
+
+    out+='"'
+    printf '%s' "$out"
+}
+
+#------------------------------------------------------------------------
 # Function: _ct_json_string_or_null
-# Purpose : get null right fool!
+# Purpose : Emit a JSON string or JSON null.
 #------------------------------------------------------------------------
 _ct_json_string_or_null() {
     if [[ -z $1 || $1 == "null" ]]; then
         printf 'null'
-    else
-        local s=$1
-        s=${s//\\/\\\\}
-        s=${s//\"/\\\"}
-        printf '"%s"' "$s"
+        return
     fi
+
+    local s=$1
+    local out='"'
+    local i char
+
+    for (( i=0; i<${#s}; i++ )); do
+        char=${s:i:1}
+
+        case "$char" in
+            $'\b') out+='\\b' ;;
+            $'\f') out+='\\f' ;;
+            $'\n') out+='\\n' ;;
+            $'\r') out+='\\r' ;;
+            $'\t') out+='\\t' ;;
+            $'\\')   out+=$'\\\\' ;;
+            '"') out+='\"' ;;
+            *)     out+="$char" ;;
+        esac
+    done
+
+    out+='"'
+    printf '%s' "$out"
 }
 
 #------------------------------------------------------------------------
@@ -1243,7 +1357,7 @@ _ct_conflicts() {
     local __CT_JSON_OUTPUT="$1"
     local __CT_EXTEND_PATH="$2"
     
-    (( __CT_EXTEND_PATH )) && _ct_add_admin_paths
+    _ct_startup "$__CT_EXTEND_PATH" || return 1
     
     if [[ $__CT_JSON_OUTPUT == 1 ]]; then
          _ct_conflicts_json
@@ -1265,30 +1379,35 @@ _ct_conflicts_print() {
     local tmpdir
     tmpdir=$(mktemp -d) || { printf "Failed to create temp dir\n" >&2; return 1; }
 
-    # Ensure cleanup on exit or interruption
-    local old_trap
-    old_trap=$(trap -p EXIT)
-
-    trap 'rm -rf "$tmpdir"; eval "$old_trap"' EXIT
-
     {  # run all jobs at once.  
+     
+        local monitor_was_enabled=0
+        shopt -qo monitor && monitor_was_enabled=1
         set +m
+        
         (_ct_keyword_conflicts  > "$tmpdir/keywords") &
         (_ct_alias_conflicts    > "$tmpdir/aliases") &
         (_ct_function_conflicts > "$tmpdir/functions") &
         (_ct_builtin_conflicts  > "$tmpdir/builtins") &
         wait
     } 2>/dev/null # suppress output
-
-    # Re-enable job control 
-    set -m
-
+   
+    # Restore original job-control state
+    if (( monitor_was_enabled )); then
+        set -m
+    else
+        set +m
+    fi          
+   
     # print output in proper order
     printf "\n"
     cat "$tmpdir/keywords"
     cat "$tmpdir/aliases"
     cat "$tmpdir/functions"
     cat "$tmpdir/builtins"
+    
+    # All workers have finished; clean up now.
+    rm -rf "$tmpdir"
 }
 
 #------------------------------------------------------------------------
@@ -1345,8 +1464,7 @@ _ct_keyword_conflicts() {
                     "$(_ct_format_kinds "$winner" "${kinds[@]}")"
             fi
         fi
-    done
-
+    done 
     printf "\n"
 }
 
@@ -1553,12 +1671,13 @@ _ct_conflicts_json() {
     # Create temporary directory
     local tmpdir
     tmpdir=$(mktemp -d) || { printf "Failed to create temp dir\n" >&2; return 1; }
-
-    # Ensure cleanup on exit or interruption
-    trap 'rm -rf "$tmpdir"' EXIT
-
-    {
-        set +m
+    
+    {  # run all jobs at once.
+    
+        local monitor_was_enabled=0
+        shopt -qo monitor && monitor_was_enabled=1
+        set +m   
+    
         (_ct_conflicts_json_keywords  > "$tmpdir/keywords") &
         (_ct_conflicts_json_aliases   > "$tmpdir/aliases") &
         (_ct_conflicts_json_functions > "$tmpdir/functions") &
@@ -1566,8 +1685,12 @@ _ct_conflicts_json() {
         wait
     } 2>/dev/null
     
-    # Re-enable job control  
-    set -m
+    # Restore original job-control state
+    if (( monitor_was_enabled )); then
+        set -m
+    else
+        set +m
+    fi   
     
     # Output results in order
     printf "\n"
@@ -1575,6 +1698,8 @@ _ct_conflicts_json() {
     cat "$tmpdir/aliases"
     cat "$tmpdir/functions"
     cat "$tmpdir/builtins"
+    
+    rm -rf "$tmpdir"
 }
  
 #------------------------------------------------------------------------
@@ -1617,8 +1742,8 @@ _ct_conflicts_json_keywords() {
         first=0
 
         printf '      {\n'
-        printf '        "name": "%s",\n' "$kw"
-        printf '        "winner": "%s",\n' "${RES[bash_type]}"
+        printf '        "name": %s,\n' "$(_ct_json_string_or_null "$kw")"
+        printf '        "winner": %s,\n' "$(_ct_json_string_or_null "${RES[bash_type]}")"
         printf '        "also_defined_as": ['
         local i
         for ((i=0;i<${#kinds[@]};i++)); do
@@ -1676,7 +1801,8 @@ _ct_conflicts_json_aliases() {
             local shadowed=true
             [[ "$k" == "$winner" ]] && shadowed=false
 
-            printf '{ "type": "%s", "shadowed": %s }' "$k" "$shadowed"
+            printf '{ "type": %s, "shadowed": %s }' \
+                   "$(_ct_json_string_or_null "$k")" "$shadowed"
         done
 
         printf ']\n'
@@ -1720,8 +1846,8 @@ _ct_conflicts_json_functions() {
         [[ "$winner" == "path" ]] && winner="external"
 
         printf '      {\n'
-        printf '        "name": "%s",\n' "$fname"
-        printf '        "winner": "%s",\n' "${RES[bash_type]}"
+        printf '        "name": %s,\n' "$(_ct_json_string_or_null "$fname")"
+        printf '        "winner": %s,\n' "$(_ct_json_string_or_null "$winner")"
         printf '        "also_defined_as": ['
 
         local first_kind=1
@@ -1733,7 +1859,8 @@ _ct_conflicts_json_functions() {
             local shadowed=true
             [[ "$k" == "$winner" ]] && shadowed=false
 
-            printf '{ "type": "%s", "shadowed": %s }' "$k" "$shadowed"
+            printf '{ "type": %s, "shadowed": %s }' \
+                   "$(_ct_json_string_or_null "$k")" "$shadowed"
         done
 
         printf ']\n'
@@ -1776,9 +1903,9 @@ _ct_conflicts_json_builtins() {
         [[ "$winner" == "path" ]] && winner="external"
     
         printf '      {\n'
-        printf '        "name": "%s",\n' "$bcmd"
-        printf '        "state": "%s",\n' "${RES[builtin_state]}"
-        printf '        "winner": "%s",\n' "$winner"
+        printf '        "name": %s,\n' "$(_ct_json_string_or_null "$bcmd")"
+        printf '        "state": %s,\n' "$(_ct_json_string_or_null "${RES[builtin_state]}")"
+        printf '        "winner": %s,\n' "$(_ct_json_string_or_null "$winner")"
         printf '        "also_defined_as": ['
 
         local first_kind=1
@@ -1790,7 +1917,8 @@ _ct_conflicts_json_builtins() {
             local shadowed=true
             [[ "$k" == "$winner" ]] && shadowed=false
 
-            printf '{ "type": "%s", "shadowed": %s }' "$k" "$shadowed"
+            printf '{ "type": %s, "shadowed": %s }' \
+                   "$(_ct_json_string_or_null "$k")" "$shadowed"
         done
 
         printf ']\n'
