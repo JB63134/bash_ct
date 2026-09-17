@@ -408,6 +408,8 @@ but:
 
 ## Screenshots / Output Preview
 
+![type](images/typewhich.png)
+
 ![awk](images/awk.png)
 
 ![ct-c](images/ct-c.png)
