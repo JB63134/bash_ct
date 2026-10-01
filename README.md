@@ -141,6 +141,11 @@ These directories may not be present in an ordinary user's `$PATH`.
 `ct` can temporarily extend the search path for discovery, allowing it to determine whether an otherwise hidden command exists outside the current `$PATH`.
 
 The shell environment is restored afterward.
+ 
+When ct changes $PATH, Bash discards its remembered command locations, also known as the command hash table. 
+Bash lazily rebuilds this table as commands are subsequently executed.
+
+ct does not directly manipulate Bash's command hash table.
 
 ### Manual path extension
 
