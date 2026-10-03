@@ -283,27 +283,38 @@ The JSON structure may evolve between major versions.
 
 ## Features
 
+### Core resolution
+
 * Bash command resolution tracing
-* Alias, function, keyword, builtin, and executable detection
-* Enabled and disabled builtin detection
-* `$PATH` visibility and precedence analysis
+* Alias / function / keyword / builtin / executable detection
+* Enabled & disabled builtin detection
 * Shadowed command detection
-* Filesystem and symlink resolution
+
+### Filesystem & kernel layer
+
+* `$PATH` visibility and precedence analysis
+* Symlink resolution + chain
 * `/etc/alternatives` detection
 * `/usr`-merge detection
-* ELF interpreter and shebang detection
-* Bash resolution target and kernel execution target analysis
-* Automatic `$PATH` extension for discovery
+* ELF interpreter & shebang detection
+* Bash resolution target vs kernel execution target
+
+### Discovery & analysis modes
+
+* Automatic `$PATH` extension
 * Manual `$PATH` extension with `-x`
 * Environment conflict analysis with `-c`
-* JSON output with `-j`
+* `command_not_found_handle` detection
+* Bash command hash-table inspection + cached-path mismatch detection
+
+### Output & usability
+
+* Colorized human output
+* JSON with `-j`
 * Combined short options such as `-cjx`
-* Colorized human-readable output
 * Tab completion
-* Shell environment preservation
-* Interactive-shell and script usage
-* Detection and reporting of Bash's command_not_found_handle
-* Bash hash table (`hash`) inspection and mismatch detection  
+* Shell state preservation
+* Works in interactive shells and scripts
 
 ---
 
