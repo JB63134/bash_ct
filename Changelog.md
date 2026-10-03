@@ -1,5 +1,19 @@
 # `bash_ct` Changelog
 
+
+## V4.4.53
+
+### Added
+
+* Added detection and reporting of Bash's `command_not_found_handle` after command resolution fails.
+* Added Bash command hash-table awareness, including detection of cached-path mismatches.
+  `ct` reports the cached state but does not modify Bash's hash table.
+
+### Fixed
+
+* Fixed an edge case in symlink-chain handling.
+
+
 ## V4.4.50
 
 ### Improved
@@ -15,6 +29,7 @@
 * Improved JSON output and escaping, including explicit handling of empty strings versus `null`.
 * Improved POSIX-mode handling and special-builtin precedence.
 * Fixed numerous edge cases in PATH resolution, conflict reporting, JSON output, and shell-state restoration.
+
 
 ## V4.4.05
 

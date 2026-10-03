@@ -1,7 +1,7 @@
 # bash_ct
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-4.4.50-blue)](https://github.com/JB63134/bash_ct/releases)
+[![Version](https://img.shields.io/badge/version-4.4.53-blue)](https://github.com/JB63134/bash_ct/releases)
 
 **Bash Command Resolution Trace**
 
@@ -115,7 +115,7 @@ This includes:
 * the first executable Bash can reach
 * later shadowed executables
 * duplicate or equivalent filesystem locations
-* system directories that are not currently present in `$PATH`
+* selected system directories that are not currently present in `$PATH`
 
 This is particularly useful when multiple versions of a command exist.
 
@@ -142,10 +142,70 @@ These directories may not be present in an ordinary user's `$PATH`.
 
 The shell environment is restored afterward.
  
-When ct changes $PATH, Bash discards its remembered command locations, also known as the command hash table. 
+When ct changes $PATH, Bash discards its remembered command locations, stored in its command hash table. 
 Bash lazily rebuilds this table as commands are subsequently executed.
 
-ct does not directly manipulate Bash's command hash table.
+`ct` does not directly modify Bash's command hash table. It does inspect the table to identify cached command paths and detect discrepancies between Bash's cached state and the current $PATH resolution.
+
+
+### Bash Hash Table (`hash`) Awareness
+
+Bash maintains an internal hash table of remembered command locations to speed up command resolution. `ct` inspects this cached state and compares it against its own live `$PATH` resolution model.
+
+When Bash has a cached path that differs from the path ct resolves through the current $PATH, ct reports the discrepancy as a hash-table warning.
+
+```text
+Bash Resolution Target:
+  ↳ Resolved to: Filesystem → /home/jb/hash_test/bin2/hashfoo
+  ↳ Hash Table Warning:
+    ↳ Cached path: /home/jb/hash_test/bin1/hashfoo
+    ↳ If the problem persists, run: hash -d hashfoo
+```
+
+#### Why Hash Mismatches Happen
+
+A discrepancy can occur when:
+
+* A command was moved or removed after Bash cached its location.
+* A previously cached path is no longer valid while another matching command is available later in `$PATH`.
+
+> **Note:** `ct` never modifies Bash's internal hash table. It reports the cached state as it exists when `ct` is run.
+
+A hash mismatch does not necessarily mean command execution will fail. For example, if Bash's cached path no longer exists, Bash can discard the stale entry, perform a new `$PATH` search, and update its hash table with the newly resolved location.
+
+#### JSON Output
+
+The cached state is exposed in machine-readable JSON through the `hash_table` object.
+
+**Cached with a mismatch:**
+
+```json
+"hash_table": {
+  "cached": true,
+  "path": "/home/jb/hash_test/bin1/hashfoo",
+  "mismatch": true
+}
+```
+
+**Cached with no mismatch:**
+
+```json
+"hash_table": {
+  "cached": true,
+  "path": "/usr/bin/awk",
+  "mismatch": false
+}
+```
+
+**Uncached (no entry in the hash table):**
+
+```json
+"hash_table": {
+  "cached": false,
+  "path": null,
+  "mismatch": false
+}
+```
 
 ### Manual path extension
 
@@ -242,6 +302,8 @@ The JSON structure may evolve between major versions.
 * Tab completion
 * Shell environment preservation
 * Interactive-shell and script usage
+* Detection and reporting of Bash's command_not_found_handle
+* Bash hash table (`hash`) inspection and mismatch detection  
 
 ---
 
@@ -252,13 +314,13 @@ The JSON structure may evolve between major versions.
 Clone the repository:
 
 ```bash
-git clone https://github.com/JB63134/bash_ct.git /usr/local/bin/bash_ct
+git clone https://github.com/JB63134/bash_ct.git ~/.bash_ct
 ```
 
 Source `.bash_ct` from your Bash startup file:
 
 ```bash
-echo "source /usr/local/bin/bash_ct/.bash_ct" >> ~/.bashrc
+echo "source ~/.bash_ct/.bash_ct" >> ~/.bashrc
 ```
 
 Then reload the shell:
@@ -375,6 +437,42 @@ This restriction reflects what `ct` is designed to investigate: **Bash command-n
 
 ---
 
+## Handling unresolved commands
+
+`command_not_found_handle` is a Bash mechanism that can be invoked when normal command resolution fails. It is not part of Bash's command-resolution search itself.
+
+When `ct` cannot resolve a command name, it reports the command as unknown or invalid.
+
+If the Bash function `command_not_found_handle` is defined, `ct` also reports its presence and source location:
+
+```bash
+ct foobarbaz
+```
+
+```text
+Unknown or invalid command: foobarbaz
+  ↳ Check your spelling and try again
+  ⎟ 
+  ↳ Post-failure Bash fallback:
+    ↳ Bash's command_not_found_handle → defined
+    ↳ Declared in (/home/jb/.bash_functions : line 104)
+    ↳ Bash may invoke this handler for a bare invocation of: foobarbaz
+
+```
+
+When examining an unresolved command, `ct` reports the handler's presence and location but does not invoke the handler.
+
+Because `command_not_found_handle` is itself a Bash function, it can also be examined directly:
+
+```bash
+ct command_not_found_handle
+```
+
+In that case, `ct` traces it as a normal Bash function and reports its definition and location.
+
+
+---
+
 ## Why `ct` exists
 
 A command can look simple at the prompt:
@@ -413,17 +511,15 @@ but:
 
 ## Screenshots / Output Preview
 
-![type](images/typewhich.png)
-
-![ct-c](images/ct-c.png)
-
-![mawk](images/mawk.png)
-
 ![cd](images/cd.png)
 
-![cd2](images/more_cd.png)
+![fstrim](images/fstrim.png)
 
-![which](images/which.png)
+![convert](images/convert.png)
+
+![hashfoo](images/hashfoo.png)
+
+![foo](images/foo.png)
 
 ---
 
