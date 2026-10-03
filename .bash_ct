@@ -60,7 +60,7 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
     return 1
 fi
 
-__CT_version=4.4.50
+__CT_version=4.4.53    
 __CT_needed_deps=(readlink readelf mktemp stat)
 __CT_optional_deps=(tput)
 __CT_extglob_was=0
@@ -258,7 +258,7 @@ _ct_main() {
 #   keyword_found    → keyword match
 #
 #   kernel_*         → execution target details (PATH only)
-#
+#   command_not_found_handle_*  → Bash post-failure handler state and location
 # Notes:
 # • Resolution precedence follows Bash rules, not filesystem order.
 # • PATH scanning records *all* candidates, not just the winner.
@@ -268,7 +268,7 @@ _ct_resolve() {
     local cmd="$1"
     local -n R="$2"      # associative result
     local -n P="$3"      # indexed PATH entries
-    local alias_out
+    local alias_out commandline commandfile
     
     # shellcheck disable=SC2034  
     R=()
@@ -283,7 +283,10 @@ _ct_resolve() {
     R[alias_shadowed]=false
     R[posix_mode]=false
     R[empty_path_component]=false
-    
+    R[command_not_found_handle_defined]=false
+    R[command_not_found_handle_file]=""
+    R[command_not_found_handle_line]=""
+
     # ------------------------------------------------------------
     # Alias
     # ------------------------------------------------------------
@@ -450,7 +453,7 @@ _ct_resolve() {
 
         P+=("$d|$state|$target|$shadow")
     done
-
+    
     # ------------------------------------------------------------
     # Kernel execution details + alternatives detection
     # ------------------------------------------------------------
@@ -484,15 +487,17 @@ _ct_resolve() {
         # Symlink chain (safe string for JSON)
         local chain=()
         local x="$found_path"
-
+        
         while [[ -L "$x" ]]; do
             y="$(readlink "$x")"
             chain+=("$x -> $y")
 
             if [[ $y == /* ]]; then
                 x="$y"
-            else
+            elif [[ $x == */* ]]; then
                 x="${x%/*}/$y"
+            else
+                x="$y"
             fi
         done
         
@@ -513,9 +518,47 @@ _ct_resolve() {
             fi
             x="$(readlink -f "$x")"
         done
+        
+        # hash table cached path detection,  and mismatch from path detection
+        local cached_path
+
+        if cached_path=$(builtin hash -t -- "$cmd" 2>/dev/null); then
+            R[hash_cached]=true
+            R[hash_path]="$cached_path"
+        else
+            R[hash_cached]=false
+            R[hash_path]=""
+        fi
+
+        if [[ ${R[bash_type]} == path &&
+              ${R[hash_cached]} == true &&
+              "$cached_path" != "$found_path" ]]; then
+            R[hash_mismatch]=true
+        else
+            R[hash_mismatch]=false
+        fi
+        
     fi
     
-    : "${R[bash_type]:=notfound}"
+        : "${R[bash_type]:=notfound}"
+    
+    if [[ ${R[bash_type]} == notfound ]] &&
+       _ct_check_command_not_found_handle; then
+        R[command_not_found_handle_defined]=true
+
+        shopt -q extdebug || {
+            shopt -s extdebug
+            local _ext=1
+        }
+
+        read -r _ commandline commandfile <<<"$(declare -F command_not_found_handle)"
+
+        [[ $_ext ]] && shopt -u extdebug
+
+        R[command_not_found_handle_file]="${commandfile:-interactive shell}"
+        R[command_not_found_handle_line]="$commandline"
+    fi
+    
     return 0
 }
 
@@ -585,17 +628,33 @@ _ct_found_in_admin_paths() {
 #------------------------------------------------------------------------
 _ct_print_trace() {
     local cmd="$1"
-
+    local handle=""
     declare -A RES
     declare -a PATH_ENTRIES
 
     _ct_resolve "$cmd" RES PATH_ENTRIES || return 1
-    
+   
+    if [[ ${RES[command_not_found_handle_defined]} == true ]]; then
+        handle=defined
+    else    
+        handle=undefined
+    fi
+           
     if [[ ${RES[bash_type]} == "notfound" ]]; then
-          printf "${__CT_RED}Unknown or invalid command: ${__CT_CYAN}%s${__CT_RESET}\n" "$cmd"
-          printf "  ↳ Check your spelling and try again\n\n"
-         return 1
-     fi
+        printf "${__CT_RED}Unknown or invalid command: ${__CT_CYAN}%s${__CT_RESET}\n" "$cmd"
+        printf "  ↳ Check your spelling and try again\n"
+        printf "  ⎟ \n"
+        printf "  ↳ Post-failure Bash fallback:\n"
+        printf "    ↳ Bash's command_not_found_handle → %s\n" "$handle"
+
+        if [[ ${RES[command_not_found_handle_defined]} == true ]]; then
+            printf "    ↳ Declared in ${__CT_CYAN}(%s : line %s)${__CT_RESET}\n" \
+            "${RES[command_not_found_handle_file]}" "${RES[command_not_found_handle_line]}"
+            printf "    ↳ Bash may invoke this handler for a bare invocation of: ${__CT_CYAN}%s${__CT_RESET}\n" "$cmd"
+        fi
+
+        return 1
+    fi
 
     printf "Command Trace of ${__CT_CYAN}%s${__CT_RESET}\n" "$cmd"
 
@@ -737,7 +796,15 @@ with the same name.\n"
         *)        printf "not found\n" ;;
     esac
     printf "  ↳ Resolved to: %s\n" "$winner_display"
-
+    
+    #----------------------------------------------------------------
+    if [[ ${RES[hash_mismatch]} == true ]]; then
+        printf "  ↳ Hash Table Warning:\n"
+        printf "    ↳ Cached path: ${__CT_CYAN}%s${__CT_RESET}\n" "${RES[hash_path]}"
+        printf "    ↳ If the problem persists, run: ${__CT_CYAN}hash -d %s${__CT_RESET}\n" "$cmd"
+    fi 
+    #----------------------------------------------------------------
+    
     # Check for secondary entity if keyword won and a shadowed alias or builtin exists
     if [[ "${RES[bash_type]}" == "keyword" ]]; then
         if [[ ${RES[alias_found]} == true ]]; then
@@ -818,8 +885,15 @@ with the same name.\n"
     else
         printf "  ↳ NONE\n"
     fi
-
     printf "\n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_check_command_not_found_handle
+# Purpose : Check whether Bash has a command_not_found_handle function
+#------------------------------------------------------------------------
+_ct_check_command_not_found_handle() {
+    declare -F command_not_found_handle >/dev/null 2>&1
 }
 
 #------------------------------------------------------------------------
@@ -1171,7 +1245,10 @@ _ct_json_output() {
     local kernel_canonical_json
     local elf_interp_json
     local shebang_json
-
+    local command_not_found_handle_file_json
+    local command_not_found_handle_line_json
+    local hash_path_json
+    
     alias_def_json=$(_ct_json_string_or_null "${RES[alias_def]}")
     function_file_json=$(_ct_json_string_or_null "${RES[function_file]}")
     function_line_json=$(_ct_json_string_or_null "${RES[function_line]}")
@@ -1180,7 +1257,14 @@ _ct_json_output() {
     kernel_canonical_json=$(_ct_json_string_or_null "${RES[kernel_canonical]}")
     elf_interp_json=$(_ct_json_string_or_null "${RES[elf_interp]}")
     shebang_json=$(_ct_json_string_or_null "${RES[shebang]}")
-
+    command_not_found_handle_file_json=$(
+        _ct_json_string_or_null "${RES[command_not_found_handle_file]}"
+    )
+    command_not_found_handle_line_json=$(
+        _ct_json_string_or_null "${RES[command_not_found_handle_line]}"
+    )
+    hash_path_json=$(_ct_json_string_or_null "${RES[hash_path]}")
+   
     # PATH JSON, one object per line
     local path_json="["
     local dir state target shadow
@@ -1276,7 +1360,19 @@ _ct_json_output() {
     "state": $builtin_state_json,
     "shadowed": ${RES[builtin_shadowed]}
   },
+  "post_failure": {
+    "command_not_found_handle": {
+      "defined": ${RES[command_not_found_handle_defined]},
+      "file": $command_not_found_handle_file_json,
+      "line": $command_not_found_handle_line_json
+    }
+  },
   "path": $path_json,
+  "hash_table": {
+    "cached": ${RES[hash_cached]},
+    "path": $hash_path_json,
+    "mismatch": ${RES[hash_mismatch]}
+  },
   "kernel": {
     "path": $kernel_path_json,
     "canonical": $kernel_canonical_json,
@@ -1693,7 +1789,6 @@ _ct_conflicts_json() {
     fi   
     
     # Output results in order
-    printf "\n"
     cat "$tmpdir/keywords"
     cat "$tmpdir/aliases"
     cat "$tmpdir/functions"
@@ -1761,7 +1856,7 @@ _ct_conflicts_json_keywords() {
 #------------------------------------------------------------------------
 _ct_conflicts_json_aliases() {
     printf '    "aliases": [\n'
-    first=1
+    local first=1
     while IFS= read -r acmd; do
         declare -A RES
         declare -a PATH_ENTRIES
@@ -1819,7 +1914,7 @@ done < <(compgen -A alias)
 #------------------------------------------------------------------------
 _ct_conflicts_json_functions() {
     printf '    "functions": [\n'
-    first=1
+    local first=1
     while IFS= read -r fname; do
         declare -A RES
         declare -a PATH_ENTRIES
@@ -1875,7 +1970,7 @@ _ct_conflicts_json_functions() {
 #------------------------------------------------------------------------
 _ct_conflicts_json_builtins() {
     printf '    "builtins": [\n'
-    first=1
+    local first=1
     for bcmd in "${__CT_BUILTINS[@]}"; do
         declare -A RES
         declare -a PATH_ENTRIES
