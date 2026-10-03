@@ -1,6 +1,6 @@
-.TH CT 1 "August 2026" "ct 4.4.05" "User Commands"
+.TH CT 1 "October 2026" "ct 4.4.53" "User Commands"
 .SH NAME
-ct \- trace Bash command resolution and analyze command conflicts
+ct - trace Bash command resolution and analyze command conflicts
 .SH SYNOPSIS
 .B ct
 [\fIoptions\fR] \fIcommand\fR
@@ -22,11 +22,29 @@ keywords, builtins, and external executables found through
 It can also identify shadowed executables and filesystem indirection
 such as symbolic links, alternatives, and usr-merged directory layouts.
 
-For executable files,
+.B ct
+accounts for Bash command-resolution behavior affected by POSIX mode,
+including special-builtin precedence and the enabled or disabled state
+of builtins.
+
+For external executable files,
 .B ct
 can inspect the interpreter specified by an ELF executable or script
 shebang and report the relationship between the Bash resolution target
 and the eventual execution target.
+
+.B ct
+also inspects Bash command hash-table state and can report when a
+cached executable path differs from the path resolved through the
+current
+.BR $PATH .
+
+When normal command resolution fails,
+.B ct
+can detect and report the presence and source location of Bash's
+.B command_not_found_handle
+function. The handler is reported but is not invoked by
+.B ct .
 
 The command argument must be a bare command name. Pathnames such as
 .I /bin/ls
@@ -36,7 +54,8 @@ are not accepted.
 
 .B ct
 operates against the current Bash environment. Its results therefore
-depend on aliases, functions, builtins, shell options, and
+depend on aliases, functions, builtins, shell options, POSIX mode, the
+Bash command hash table, and
 .BR $PATH
 visible to the invoking shell.
 
@@ -109,6 +128,14 @@ identify executables shadowed by those definitions.
 .TP
 .BR -cjx
 Combined short options may be supplied without separating the flags.
+For example,
+.B ct -cjx command
+is equivalent to supplying
+.BR -c ,
+.BR -j ,
+and
+.BR -x
+separately.
 
 .SH COMMAND RESOLUTION
 When Bash encounters a command name, resolution can involve several
@@ -153,10 +180,96 @@ ELF interpreters
 script shebangs
 .PP
 
+.B ct
+also accounts for Bash command-resolution rules affected by POSIX mode,
+including the precedence of POSIX special builtins and the enabled or
+disabled state of builtins.
+
 This allows
 .B ct
 to distinguish the command Bash selects from what the operating system
 subsequently loads or executes.
+
+.SH RESOLUTION AND EXECUTION TARGETS
+For an external command,
+.B ct
+distinguishes between the target selected by Bash during command
+resolution and the executable subsequently loaded or executed.
+
+The
+.B Bash Resolution Target
+identifies the command selected by Bash, including the selected
+filesystem path.
+
+The
+.B Kernel Execution Target
+identifies the executable reached after filesystem indirection such as
+symbolic links or
+.BR /etc/alternatives ,
+and may include the ELF interpreter or script interpreter involved in
+execution.
+
+For shell constructs such as aliases, functions, keywords, and
+builtins, no kernel execution target exists.
+
+.SH BASH HASH TABLE
+Bash maintains a command hash table containing paths previously found
+through
+.BR $PATH .
+
+.B ct
+inspects this cached state when available and compares a cached
+executable path with the path resolved through the current
+.BR $PATH .
+
+If the paths differ,
+.B ct
+reports the discrepancy as a hash-table mismatch.
+
+The hash-table state reported by
+.B ct
+describes Bash's current cached state. The comparison is performed
+against the path
+.B ct
+resolves through the current search path.
+
+.B ct
+does not modify, clear, or rebuild the Bash command hash table.
+
+Changes to
+.BR $PATH
+may cause Bash to discard remembered command locations. When
+.B ct
+temporarily changes
+.BR $PATH
+during path extension, the original
+.BR $PATH
+and shell state are restored before
+.B ct
+returns.
+
+.SH COMMAND NOT FOUND HANDLING
+If normal Bash command resolution fails,
+.B ct
+checks whether the current shell defines
+.BR command_not_found_handle .
+
+If present,
+.B ct
+reports that the function is defined and identifies its source location
+when available.
+
+.B command_not_found_handle
+is a Bash post-resolution mechanism. It is not part of the normal
+command-resolution search.
+
+.B ct
+reports the handler but does not invoke it during analysis.
+
+The handler itself can be traced as a normal Bash function:
+
+.B
+ct command_not_found_handle
 
 .SH PATH DISCOVERY
 .B ct
@@ -165,17 +278,25 @@ examines
 in search order and can report executable candidates that are
 shadowed by an earlier entry.
 
+An empty component in
+.BR $PATH
+is treated by Bash as the current working directory.
+.B ct
+reports such components explicitly during path analysis.
+
 Some system commands reside in administrative directories such as
 .I /usr/sbin
 or
 .I /sbin
 that may not be present in an ordinary user's
 .BR $PATH .
+
 Normally,
 .B ct
 automatically extends the search path when a command cannot be found
 in the user's
 .BR $PATH .
+
 The
 .B -x
 option forces this path extension even when the command has already
@@ -185,6 +306,7 @@ to discover executable files in administrative directories that are
 shadowed by an earlier
 .BR $PATH
 entry.
+
 The original
 .BR $PATH
 is restored when analysis completes.
@@ -206,11 +328,12 @@ functions
 builtins
 .PP
 
-It determines which definitions are present for each name and evaluates 
-their precedence under Bash command resolution rules.
+It determines which definitions are present for each name and evaluates
+their precedence under Bash command-resolution rules, including
+relevant POSIX-mode behavior.
 
-External executables are not treated as competing command definitions 
-in this mode. They are checked only to determine whether an executable 
+External executables are not treated as competing command definitions
+in this mode. They are checked only to determine whether an executable
 exists that can be shadowed by a shell definition.
 
 For example, an external executable may be reported as
@@ -218,8 +341,9 @@ For example, an external executable may be reported as
 when a shell-defined command name prevents that executable from being
 selected.
 
-Conflict mode is intended to identify command-name collisions within the
-current Bash environment.
+Conflict mode is intended to identify command-name collisions within
+the current Bash environment. It does not perform the full filesystem
+and execution trace performed by normal command tracing.
 
 .SH ENVIRONMENT
 .B ct
@@ -236,7 +360,6 @@ returns.
 .B ct
 does not permanently modify the invoking shell environment.
 
-Non-zero command results may represent normal analysis conditions;
 .B ct
 does not require or enforce
 .BR "set -e" ,
@@ -254,11 +377,27 @@ Results depend on the current Bash environment.
 Filesystem information depends on platform layout and available
 permissions.
 .br
+Bash command hash-table state reflects the invoking shell and may
+change when
+.BR $PATH
+changes.
+.br
 Conflict analysis may require more time in large or heavily customized
 shell environments.
 .br
 PATH-based executable candidates are not treated as competing command
 definitions in conflict mode.
+.br
+.B ct
+does not invoke
+.B command_not_found_handle
+during analysis.
+.br
+The kernel execution target describes filesystem and interpreter
+indirection visible to
+.B ct
+and does not trace subsequent processes or system calls performed by
+the executed program.
 
 .SH REQUIREMENTS
 .B ct
@@ -314,6 +453,17 @@ Analyze command-name conflicts in the current Bash environment.
 .B ct -cj
 Produce JSON conflict analysis.
 
+.TP
+.B ct foobarbaz
+Report an unresolved command and, when defined, the current
+.B command_not_found_handle
+function.
+
+.TP
+.B ct command_not_found_handle
+Trace the Bash function used for post-resolution command-not-found
+handling.
+
 .SH EXIT STATUS
 .B ct
 returns a non-zero status when command analysis encounters an error or
@@ -326,14 +476,16 @@ command itself is invalid or unusable.
 .BR bash (1),
 .BR type (1),
 .BR command (1),
+.BR hash (1),
 .BR which (1),
 .BR file (1),
 .BR readlink (1),
 .BR readelf (1)
 
 .SH AUTHOR
-John Blair  <jjohnnn@hotmail.com>
+John Blair  [jjohnnn@hotmail.com](mailto:jjohnnn@hotmail.com)
 
 .SH LICENSE
 .B ct
 is distributed under the MIT License.
+
