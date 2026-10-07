@@ -60,7 +60,7 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
     return 1
 fi
 
-__CT_version=4.4.53    
+__CT_version=4.4.55 
 __CT_needed_deps=(readlink readelf mktemp stat)
 __CT_optional_deps=(tput)
 __CT_extglob_was=0
@@ -286,7 +286,10 @@ _ct_resolve() {
     R[command_not_found_handle_defined]=false
     R[command_not_found_handle_file]=""
     R[command_not_found_handle_line]=""
-
+    R[hash_cached]=false
+    R[hash_path]=""
+    R[hash_mismatch]=false
+    
     # ------------------------------------------------------------
     # Alias
     # ------------------------------------------------------------
@@ -636,10 +639,10 @@ _ct_print_trace() {
    
     if [[ ${RES[command_not_found_handle_defined]} == true ]]; then
         handle=defined
-    else    
+    else
         handle=undefined
     fi
-           
+
     if [[ ${RES[bash_type]} == "notfound" ]]; then
         printf "${__CT_RED}Unknown or invalid command: ${__CT_CYAN}%s${__CT_RESET}\n" "$cmd"
         printf "  ↳ Check your spelling and try again\n"
@@ -648,8 +651,9 @@ _ct_print_trace() {
         printf "    ↳ Bash's command_not_found_handle → %s\n" "$handle"
 
         if [[ ${RES[command_not_found_handle_defined]} == true ]]; then
-            printf "    ↳ Declared in ${__CT_CYAN}(%s : line %s)${__CT_RESET}\n" \
-            "${RES[command_not_found_handle_file]}" "${RES[command_not_found_handle_line]}"
+            local handle_location
+            handle_location=$(_ct_function_link "${RES[command_not_found_handle_file]}" "${RES[command_not_found_handle_line]}")
+            printf "    ↳ Declared in ${__CT_CYAN}(%s)${__CT_RESET}\n" "$handle_location"
             printf "    ↳ Bash may invoke this handler for a bare invocation of: ${__CT_CYAN}%s${__CT_RESET}\n" "$cmd"
         fi
 
@@ -692,12 +696,13 @@ with the same name.\n"
     # Function
     # ------------------------------------------------------------
     if [[ ${RES[function_found]} == true ]]; then
+        local location
+        location=$(_ct_function_link "${RES[function_file]}" "${RES[function_line]}")
+
         if [[ ${RES[function_shadowed]} == true ]]; then
-            printf "Function: -  ${__CT_GREY}%s → found → Function %s (%s : line %s) [shadowed]${__CT_RESET}\n" \
-            "$cmd" "$cmd" "${RES[function_file]}" "${RES[function_line]}"
+            printf "Function: -  ${__CT_GREY}%s → found → Function %s (%s) [shadowed]${__CT_RESET}\n" "$cmd" "$cmd" "$location"
         else
-            printf "Function: -  ${__CT_CYAN}%s → found → Function %s (%s : line %s)${__CT_RESET}\n" \
-            "$cmd" "$cmd" "${RES[function_file]}" "${RES[function_line]}"
+            printf "Function: -  ${__CT_CYAN}%s → found → Function %s (%s)${__CT_RESET}\n" "$cmd" "$cmd" "$location"
         fi
     else
         printf "Function: -  not found\n"
@@ -790,7 +795,7 @@ with the same name.\n"
     case "${RES[bash_type]}" in
         keyword) winner_display="${__CT_CYAN}Keyword → ${RES[command]}${__CT_RESET}" ;;
         alias)    winner_display="${__CT_CYAN}Alias → ${RES[command]} → ${RES[alias_def]}${__CT_RESET}" ;;
-        function) winner_display="${__CT_CYAN}Function → ${RES[command]} → ${RES[function_file]} : line ${RES[function_line]}${__CT_RESET}" ;;
+        function) winner_display="${__CT_CYAN}Function → ${RES[command]} → ($location)${__CT_RESET}" ;;
         builtin)  winner_display="${__CT_CYAN}Builtin → ${RES[command]} → ${RES[builtin_state]}${__CT_RESET}" ;;
         path)     winner_display="${__CT_CYAN}Filesystem → ${RES[kernel_path]}${__CT_RESET}" ;;
         *)        printf "not found\n" ;;
@@ -886,6 +891,18 @@ with the same name.\n"
         printf "  ↳ NONE\n"
     fi
     printf "\n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ct_function_link
+# Purpose : Convert function location into osc8 hyperlink
+#------------------------------------------------------------------------
+_ct_function_link() {
+    local file=$1
+    local line=$2
+
+    printf '\e]8;;file://%s\a%s : line %s\e]8;;\a' \
+        "$file" "$file" "$line"
 }
 
 #------------------------------------------------------------------------
