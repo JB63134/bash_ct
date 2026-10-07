@@ -1,15 +1,26 @@
 # bash_ct
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-4.4.53-blue)](https://github.com/JB63134/bash_ct/releases)
+[![Version](https://img.shields.io/badge/version-4.4.55-blue)](https://github.com/JB63134/bash_ct/releases)
 
-**Bash Command Resolution Trace**
+**Bash Command Resolution Tracer**
 
-**`ct` (Command Trace) is a Bash command resolution tracer.**
+**`ct` (Command Trace) is a Bash command-resolution debugger and tracer.**
 
-It examines how a command name resolves and traces the subsequent filesystem and execution layers, bringing them together into a single resolution model.
+It examines how a command name resolves and traces the subsequent filesystem
+and execution layers, bringing them together into a single resolution model.
 
 The goal is to answer not only **what command Bash will use**, but **why it resolves that way and what ultimately executes**.
+
+---
+
+**`ct` has its own command-resolution engine.**
+
+`ct` does **not** wrap or depend on `type`, `which`, or `command -v` to perform command resolution. It independently models Bash's command-resolution rules, then traces the selected command through filesystem and executable-loading layers.
+
+`ct` was written in Bash and models Bash command resolution from within the running shell. It observes the current Bash environment and resolution state without modifying Bash's command-resolution behavior.
+
+It models the resolution decision first, then follows the selected command through filesystem indirection and executable-loading layers to determine what ultimately executes.
 
 ---
 
@@ -285,7 +296,7 @@ The JSON structure may evolve between major versions.
 
 ### Core resolution
 
-* Bash command resolution tracing
+* Bash command-resolution debugging and tracing
 * Alias / function / keyword / builtin / executable detection
 * Enabled & disabled builtin detection
 * Shadowed command detection
@@ -313,6 +324,7 @@ The JSON structure may evolve between major versions.
 * JSON with `-j`
 * Combined short options such as `-cjx`
 * Tab completion
+* OSC 8 hyperlinks for source locations
 * Shell state preservation
 * Works in interactive shells and scripts
 

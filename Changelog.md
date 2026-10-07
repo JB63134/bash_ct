@@ -1,5 +1,13 @@
 # `bash_ct` Changelog
 
+## V4.4.55
+
+### Added
+* Added osc8 hyperlinks for function locations
+
+### Fixed
+* added default values for several variables that affected JSON output.
+
 
 ## V4.4.53
 
